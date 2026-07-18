@@ -13,7 +13,7 @@ import types
 import requests
 
 # Expose utils helpers imported/mocked directly via agent
-from utils import (
+from tddrobo.utils import (
     add_line_numbers,
     apply_search_replace_blocks,
     call_llm_standard,
@@ -136,13 +136,13 @@ class AgentModule(types.ModuleType):
         super().__setattr__(name, value)
         # List of submodules to propagate mock attribute updates
         submodules = [
-            "agent.nodes",
-            "agent.runner",
-            "agent.oracle",
-            "agent.history",
-            "agent.edges",
-            "agent.prompt_builder",
-            "agent.graph",
+            "tddrobo.agent.nodes",
+            "tddrobo.agent.runner",
+            "tddrobo.agent.oracle",
+            "tddrobo.agent.history",
+            "tddrobo.agent.edges",
+            "tddrobo.agent.prompt_builder",
+            "tddrobo.agent.graph",
         ]
         for submod_name in submodules:
             if submod_name in sys.modules:
@@ -156,13 +156,13 @@ class AgentModule(types.ModuleType):
         except AttributeError:
             pass
         submodules = [
-            "agent.nodes",
-            "agent.runner",
-            "agent.oracle",
-            "agent.history",
-            "agent.edges",
-            "agent.prompt_builder",
-            "agent.graph",
+            "tddrobo.agent.nodes",
+            "tddrobo.agent.runner",
+            "tddrobo.agent.oracle",
+            "tddrobo.agent.history",
+            "tddrobo.agent.edges",
+            "tddrobo.agent.prompt_builder",
+            "tddrobo.agent.graph",
         ]
         for submod_name in submodules:
             if submod_name in sys.modules:

@@ -12,9 +12,9 @@ from typing import cast
 import markdownify
 import requests
 
-import config
-from logger import logger, print
-from prompts import (
+from tddrobo import config
+from tddrobo.logger import logger, print
+from tddrobo.prompts import (
     DECIDE_REFACTOR_PROMPT,
     GENERATE_INTEGRATION_BUG_REPORT_PROMPT,
     GENERATE_README_PROMPT,
@@ -29,7 +29,7 @@ from prompts import (
     REVIEW_TEST_PLAN_PROMPT,
     TEST_PLAN_ORACLE_CONSTRAINTS,
 )
-from schema import (
+from tddrobo.schema import (
     ArchitectureAudit,
     BugReport,
     DesignDocument,
@@ -42,7 +42,7 @@ from schema import (
     TestPlan,
     TestPlanReviewReport,
 )
-from utils import (
+from tddrobo.utils import (
     add_line_numbers,
     apply_search_replace_blocks,
     call_llm_standard,

@@ -2,8 +2,8 @@ import argparse
 import os
 import typing
 
-import config
 from cli import main as cli_main
+from tddrobo import config
 
 
 def run_demo(

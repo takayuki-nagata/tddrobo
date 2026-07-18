@@ -7,10 +7,10 @@ import time
 
 import mlflow
 
-import config
-from agent import TDDAgent
-from logger import logger, print
-from utils import FileMemorySaver
+from tddrobo import config
+from tddrobo.agent import TDDAgent
+from tddrobo.logger import logger, print
+from tddrobo.utils import FileMemorySaver
 
 DEFAULT_IMPL_NAME = config.DEFAULT_IMPL_NAME
 DEFAULT_TEST_NAME = config.DEFAULT_TEST_NAME
@@ -256,13 +256,34 @@ def main(args_list=None):
     if args.draw_graph:
         tdd_agent = TDDAgent()
         try:
-            graph_path = "workflow_graph.png"
-            with open(graph_path, "wb") as graph_f:
-                graph_f.write(tdd_agent.get_graph().draw_mermaid_png())
-            print(f"✅ Saved workflow graph to {graph_path}")
+            docs_dir = "docs"
+            os.makedirs(docs_dir, exist_ok=True)
+
+            # Get Mermaid text definition of the workflow graph
+            new_mermaid_text = tdd_agent.get_graph().draw_mermaid()
+            mmd_path = os.path.join(docs_dir, "workflow_graph.mmd")
+            graph_path = os.path.join(docs_dir, "workflow_graph.png")
+
+            # Compare with existing definition if it exists
+            existing_mermaid_text = ""
+            if os.path.exists(mmd_path):
+                with open(mmd_path, "r", encoding="utf-8") as f:
+                    existing_mermaid_text = f.read()
+
+            if new_mermaid_text != existing_mermaid_text or not os.path.exists(graph_path):
+                # Write Mermaid text definition
+                with open(mmd_path, "w", encoding="utf-8") as f:
+                    f.write(new_mermaid_text)
+
+                # Draw and write PNG image
+                with open(graph_path, "wb") as graph_f:
+                    graph_f.write(tdd_agent.get_graph().draw_mermaid_png())
+                print(f"✅ Workflow graph updated and saved to {graph_path} and {mmd_path}")
+            else:
+                print("ℹ️ Workflow graph is already up to date. No changes made.")
             return None
         except Exception as e:
-            print(f"❌ Could not save workflow graph image: {e}")
+            print(f"❌ Could not save workflow graph: {e}")
             sys.exit(1)
 
     # Resolve session ID and paths
@@ -384,7 +405,7 @@ def main(args_list=None):
     tdd_agent = TDDAgent(checkpointer=memory_saver)
 
     # Bind dynamic oracle verifier for assertions
-    from utils import evaluate_math_expression
+    from tddrobo.utils import evaluate_math_expression
 
     config.ORACLE_VERIFIER = evaluate_math_expression
 

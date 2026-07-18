@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from utils import (
+from tddrobo.utils import (
     FileMemorySaver,
     Workspace,
     add_line_numbers,
@@ -24,7 +24,7 @@ def test_extract_code():
 
 
 def test_extract_none():
-    from utils import add_line_numbers, extract_code, extract_json
+    from tddrobo.utils import add_line_numbers, extract_code, extract_json
 
     assert extract_code(None) == ""
     assert extract_json(None) == ""
@@ -51,9 +51,9 @@ def test_add_line_numbers():
     assert add_line_numbers("") == ""
 
 
-@patch("utils.subprocess.run")
+@patch("tddrobo.utils.subprocess.run")
 def test_evaluate_math_expression_success(mock_run):
-    import config
+    from tddrobo import config
 
     mock_run.return_value = MagicMock(returncode=0, stdout="3.1415\n", stderr="")
     with patch.object(config, "VERBOSE", True):
@@ -62,9 +62,9 @@ def test_evaluate_math_expression_success(mock_run):
     mock_run.assert_called_once()
 
 
-@patch("utils.subprocess.run")
+@patch("tddrobo.utils.subprocess.run")
 def test_evaluate_math_expression_dynamic_math_lib_resolution(mock_run):
-    import config
+    from tddrobo import config
 
     # Simulate:
     # 1. First run: command evaluates to '0' (standard mode)
@@ -82,9 +82,9 @@ def test_evaluate_math_expression_dynamic_math_lib_resolution(mock_run):
 
 
 def test_evaluate_math_expression_math_lib_branch():
-    import config
+    from tddrobo import config
 
-    with patch("utils.subprocess.run") as mock_run:
+    with patch("tddrobo.utils.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stdout="0.8414\n", stderr="")
         with patch.object(config, "VERBOSE", True):
             result = evaluate_math_expression("s(1)")
@@ -93,17 +93,17 @@ def test_evaluate_math_expression_math_lib_branch():
 
 
 def test_run_bc_command_with_expected():
-    from utils import run_bc_command
+    from tddrobo.utils import run_bc_command
 
-    with patch("utils.evaluate_math_expression") as mock_eval:
+    with patch("tddrobo.utils.evaluate_math_expression") as mock_eval:
         mock_eval.return_value = "2"
         assert run_bc_command("1+1", expected="2") == "2"
         mock_eval.assert_called_once_with("1+1", "2")
 
 
-@patch("utils.subprocess.run")
+@patch("tddrobo.utils.subprocess.run")
 def test_evaluate_math_expression_error(mock_run):
-    import config
+    from tddrobo import config
 
     mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="parse error\n")
     with patch.object(config, "VERBOSE", True):
@@ -111,9 +111,9 @@ def test_evaluate_math_expression_error(mock_run):
     assert result == "Error: parse error"
 
 
-@patch("utils.subprocess.run")
+@patch("tddrobo.utils.subprocess.run")
 def test_evaluate_math_expression_error_zero_returncode(mock_run):
-    import config
+    from tddrobo import config
 
     # Exit code is 0, but stderr has content (e.g. syntax error in bc for loops)
     mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="syntax error\n")
@@ -125,13 +125,13 @@ def test_evaluate_math_expression_error_zero_returncode(mock_run):
 def test_evaluate_math_expression_timeout():
     import subprocess
 
-    with patch("utils.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="bc", timeout=5)):
+    with patch("tddrobo.utils.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="bc", timeout=5)):
         result = evaluate_math_expression("1+1")
         assert "timed out after 5" in result
 
 
 def test_evaluate_math_expression_exception():
-    with patch("utils.subprocess.run", side_effect=Exception("mocked error")):
+    with patch("tddrobo.utils.subprocess.run", side_effect=Exception("mocked error")):
         result = evaluate_math_expression("1+1")
         assert "Exception occurred" in result
         assert "mocked error" in result
@@ -168,7 +168,7 @@ def test_file_memory_saver_save_load(tmp_path):
 def test_file_memory_saver_load_other_attrs(tmp_path):
     import pickle
 
-    from utils import FileMemorySaver
+    from tddrobo.utils import FileMemorySaver
 
     checkpoint_path = str(tmp_path / "test_cp.pkl")
     data = {"new_attr": "value1", "file_path": "overwritten"}
@@ -183,7 +183,7 @@ def test_file_memory_saver_load_other_attrs(tmp_path):
 def test_file_memory_saver_unpicklable(tmp_path):
     import threading
 
-    from utils import FileMemorySaver
+    from tddrobo.utils import FileMemorySaver
 
     checkpoint_path = str(tmp_path / "test_cp.pkl")
     saver = FileMemorySaver(checkpoint_path)
@@ -193,7 +193,7 @@ def test_file_memory_saver_unpicklable(tmp_path):
 
 
 def test_file_memory_saver_load_exception(tmp_path):
-    from utils import FileMemorySaver
+    from tddrobo.utils import FileMemorySaver
 
     checkpoint_path = str(tmp_path / "test_cp.pkl")
     with open(checkpoint_path, "wb") as f:
@@ -203,7 +203,7 @@ def test_file_memory_saver_load_exception(tmp_path):
 
 
 def test_file_memory_saver_save_exception(tmp_path):
-    from utils import FileMemorySaver
+    from tddrobo.utils import FileMemorySaver
 
     checkpoint_path = str(tmp_path / "test_cp.pkl")
     saver = FileMemorySaver(checkpoint_path)
@@ -213,7 +213,7 @@ def test_file_memory_saver_save_exception(tmp_path):
 
 
 def test_file_memory_saver_put_and_writes(tmp_path):
-    from utils import FileMemorySaver
+    from tddrobo.utils import FileMemorySaver
 
     checkpoint_path = str(tmp_path / "test_cp.pkl")
     saver = FileMemorySaver(checkpoint_path)
@@ -226,9 +226,9 @@ def test_file_memory_saver_put_and_writes(tmp_path):
 
 
 def test_genai_client_generate_methods():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         with patch.object(llm, "call_with_retry", side_effect=["code_res", "doc_res"]) as mock_call:
             assert llm.generate_with_reasoning("prompt") == "code_res"
@@ -236,41 +236,41 @@ def test_genai_client_generate_methods():
             assert mock_call.call_count == 2
 
 
-@patch("utils._default_llm.generate_with_reasoning")
+@patch("tddrobo.utils._default_llm.generate_with_reasoning")
 def test_call_llm_with_reasoning_facade(mock_generate_with_reasoning):
     mock_generate_with_reasoning.return_value = "test_code"
     assert call_llm_with_reasoning("prompt") == "test_code"
     mock_generate_with_reasoning.assert_called_once_with("prompt")
 
 
-@patch("utils._default_workspace.save_artifact")
+@patch("tddrobo.utils._default_workspace.save_artifact")
 def test_save_artifact_facade(mock_save_artifact):
     mock_save_artifact.return_value = "path"
     assert save_artifact("file", "content") == "path"
     mock_save_artifact.assert_called_once_with("file", "content")
 
 
-@patch("utils._default_llm.generate_standard")
+@patch("tddrobo.utils._default_llm.generate_standard")
 def test_call_llm_standard_facade(mock_generate_standard):
-    from utils import call_llm_standard
+    from tddrobo.utils import call_llm_standard
 
     mock_generate_standard.return_value = "doc_res"
     assert call_llm_standard("prompt") == "doc_res"
 
 
 def test_genai_client_no_api_keys():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch.dict("os.environ", {}, clear=True), patch("utils.genai.Client"):
+    with patch.dict("os.environ", {}, clear=True), patch("tddrobo.utils.genai.Client"):
         client = GenAIClient(debug_mode=False)
         assert client.client is not None
 
 
 def test_genai_client_init_exception():
-    import config
-    from utils import GenAIClient
+    from tddrobo import config
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client") as MockClient, patch.object(config, "VERBOSE", True):
+    with patch("tddrobo.utils.genai.Client") as MockClient, patch.object(config, "VERBOSE", True):
         mock_client = MockClient.return_value
         mock_client.models.list.side_effect = Exception("list error")
         client = GenAIClient(debug_mode=False)
@@ -278,24 +278,24 @@ def test_genai_client_init_exception():
 
 
 def test_genai_client_gemini_key_fallback():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
     env_mock = {"GEMINI_API_KEY": "fake_gemini_key"}
-    with patch.dict("os.environ", env_mock, clear=True), patch("utils.genai.Client"):
+    with patch.dict("os.environ", env_mock, clear=True), patch("tddrobo.utils.genai.Client"):
         client = GenAIClient(debug_mode=False)
         _ = client.client
         assert os.environ.get("GOOGLE_API_KEY") == "fake_gemini_key"
 
 
 def test_genai_client_debug_mode():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
     class MockModel:
         def __init__(self, name, actions):
             self.name = name
             self.supported_actions = actions
 
-    with patch("utils.genai.Client") as MockClient:
+    with patch("tddrobo.utils.genai.Client") as MockClient:
         mock_client = MockClient.return_value
         mock_client.models.list.return_value = [
             MockModel("gemini-1.5-flash", ["generateContent"]),
@@ -308,9 +308,9 @@ def test_genai_client_debug_mode():
 def test_genai_client_retry_logic():
     from google.genai.errors import APIError
 
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
 
         # Mock count_tokens
@@ -323,7 +323,7 @@ def test_genai_client_retry_logic():
 
         llm.client.models.generate_content_stream.side_effect = [error, [good_chunk]]
 
-        with patch("utils.time.sleep") as mock_sleep:
+        with patch("tddrobo.utils.time.sleep") as mock_sleep:
             res = llm.call_with_retry("model", "prompt", retries=3)
             assert res == "success_code"
             mock_sleep.assert_called_once()
@@ -332,9 +332,9 @@ def test_genai_client_retry_logic():
 def test_genai_client_exponential_backoff_jitter():
     from google.genai.errors import APIError
 
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -351,7 +351,7 @@ def test_genai_client_exponential_backoff_jitter():
 
         llm.client.models.generate_content_stream.side_effect = [error_suggested, error_no_suggested, [good_chunk]]
 
-        with patch("utils.time.sleep") as mock_sleep:
+        with patch("tddrobo.utils.time.sleep") as mock_sleep:
             res = llm.call_with_retry("model", "prompt", retries=5)
             assert res == "success_code"
 
@@ -370,9 +370,9 @@ def test_genai_client_exponential_backoff_jitter():
 def test_genai_client_daily_quota_error():
     from google.genai.errors import ClientError
 
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -392,9 +392,9 @@ def test_genai_client_daily_quota_error():
 
 
 def test_genai_client_retry_logic_json_error():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -404,17 +404,17 @@ def test_genai_client_retry_logic_json_error():
 
         llm.client.models.generate_content_stream.side_effect = [[bad_chunk], [good_chunk]]
 
-        with patch("utils.time.sleep") as mock_sleep:
+        with patch("tddrobo.utils.time.sleep") as mock_sleep:
             res = llm.call_with_retry("model", "prompt", response_schema={"type": "object"})
             assert '{"ok": "yes"}' in res
             mock_sleep.assert_called_once()
 
 
-@patch("utils.time.sleep")
+@patch("tddrobo.utils.time.sleep")
 def test_genai_client_streaming_loop_numeric_exceed(mock_sleep):
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -429,11 +429,11 @@ def test_genai_client_streaming_loop_numeric_exceed(mock_sleep):
         assert res == "ok"
 
 
-@patch("utils.time.sleep")
+@patch("tddrobo.utils.time.sleep")
 def test_genai_client_streaming_loop_numeric_allowed(mock_sleep):
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -446,9 +446,9 @@ def test_genai_client_streaming_loop_numeric_allowed(mock_sleep):
 
 
 def test_genai_client_streaming_malformed_brackets():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -461,9 +461,9 @@ def test_genai_client_streaming_malformed_brackets():
 
 
 def test_genai_client_sync_loop_numeric_allowed():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
         text = "01234567890123" * 9
@@ -477,9 +477,9 @@ def test_genai_client_sync_loop_numeric_allowed():
 
 
 def test_genai_client_sync_debug_mode():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=True)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
         mock_response = MagicMock(text="test sync debug", candidates=[MagicMock(finish_reason="STOP")])
@@ -492,9 +492,9 @@ def test_genai_client_sync_debug_mode():
 
 
 def test_genai_client_streaming_json_object_incomplete():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
         chunk = MagicMock(text="}{", candidates=[MagicMock(finish_reason="STOP")])
@@ -505,9 +505,9 @@ def test_genai_client_streaming_json_object_incomplete():
 
 
 def test_genai_client_streaming_debug_mode():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=True)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
         chunk = MagicMock(text="debug output", candidates=[MagicMock(finish_reason="STOP")])
@@ -517,9 +517,9 @@ def test_genai_client_streaming_debug_mode():
 
 
 def test_genai_client_streaming_long_normal_text():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -532,9 +532,9 @@ def test_genai_client_streaming_long_normal_text():
 
 
 def test_genai_client_streaming_json_extra_close_brace():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -546,11 +546,11 @@ def test_genai_client_streaming_json_extra_close_brace():
         assert text in res
 
 
-@patch("utils.time.sleep")
+@patch("tddrobo.utils.time.sleep")
 def test_genai_client_streaming_loop_detection_retry(mock_sleep):
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -565,9 +565,9 @@ def test_genai_client_streaming_loop_detection_retry(mock_sleep):
 
 
 def test_genai_client_streaming_json_loop_detection():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
         text = '{"a": 1}{"a": 1}{"a": 1}{"a": 1}'
@@ -578,9 +578,9 @@ def test_genai_client_streaming_json_loop_detection():
 
 
 def test_genai_client_sync_with_tools():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -595,9 +595,9 @@ def test_genai_client_sync_with_tools():
 
 
 def test_genai_client_sync_loop_detection():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -611,9 +611,9 @@ def test_genai_client_sync_loop_detection():
 
 
 def test_genai_client_unrecoverable_error():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.side_effect = ValueError("Fatal Error")
         with pytest.raises(ValueError, match="Fatal Error"):
@@ -621,9 +621,9 @@ def test_genai_client_unrecoverable_error():
 
 
 def test_genai_client_unknown_runtime_error():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.side_effect = RuntimeError("Unknown error")
         with pytest.raises(RuntimeError, match="Unknown error"):
@@ -633,9 +633,9 @@ def test_genai_client_unknown_runtime_error():
 def test_genai_client_api_error_400():
     from google.genai.errors import APIError
 
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         error = APIError("Bad Request", {})
         error.code = 400
@@ -645,14 +645,14 @@ def test_genai_client_api_error_400():
 
 
 def test_workspace_get_path(tmp_path):
-    from utils import Workspace
+    from tddrobo.utils import Workspace
 
     ws = Workspace(str(tmp_path))
     assert ws.get_path("test.txt") == os.path.join(str(tmp_path), "test.txt")
 
 
 def test_get_prompt_existing():
-    from utils import get_prompt
+    from tddrobo.utils import get_prompt
 
     with patch("mlflow.genai.load_prompt") as mock_load:
         mock_prompt = MagicMock()
@@ -662,7 +662,7 @@ def test_get_prompt_existing():
 
 
 def test_get_prompt_changed():
-    from utils import get_prompt
+    from tddrobo.utils import get_prompt
 
     with patch("mlflow.genai.load_prompt") as mock_load, patch("mlflow.genai.register_prompt") as mock_register:
         mock_prompt = MagicMock()
@@ -677,7 +677,7 @@ def test_get_prompt_changed():
 
 
 def test_get_prompt_not_found():
-    from utils import get_prompt
+    from tddrobo.utils import get_prompt
 
     with (
         patch("mlflow.genai.load_prompt", side_effect=Exception("not found")),
@@ -690,7 +690,7 @@ def test_get_prompt_not_found():
 
 
 def test_get_prompt_register_error():
-    from utils import get_prompt
+    from tddrobo.utils import get_prompt
 
     with (
         patch("mlflow.genai.load_prompt", side_effect=Exception("not found")),
@@ -702,7 +702,7 @@ def test_get_prompt_register_error():
 def test_utils_file_memory_saver_load_exception(tmp_path):
     from unittest.mock import patch
 
-    from utils import FileMemorySaver
+    from tddrobo.utils import FileMemorySaver
 
     checkpoint_path = str(tmp_path / "test_cp.pkl")
     with open(checkpoint_path, "w") as f:
@@ -716,9 +716,9 @@ def test_utils_file_memory_saver_load_exception(tmp_path):
 def test_utils_genai_client_no_api_keys():
     from unittest.mock import patch
 
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch.dict("os.environ", {}, clear=True), patch("utils.genai.Client"):
+    with patch.dict("os.environ", {}, clear=True), patch("tddrobo.utils.genai.Client"):
         client = GenAIClient()
         assert client is not None
 
@@ -726,9 +726,9 @@ def test_utils_genai_client_no_api_keys():
 def test_utils_genai_client_sync_debug_print():
     from unittest.mock import MagicMock, patch
 
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=True)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
         llm.client.models.generate_content.return_value = MagicMock(text="debug output", candidates=[])
@@ -741,9 +741,9 @@ def test_utils_genai_client_sync_debug_print():
 def test_utils_genai_client_streaming_debug_newline():
     from unittest.mock import MagicMock, patch
 
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=True)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
         chunk = MagicMock(text="chunk", candidates=[MagicMock(finish_reason="STOP")])
@@ -754,9 +754,9 @@ def test_utils_genai_client_streaming_debug_newline():
 def test_utils_genai_client_elapsed_time_zero():
     from unittest.mock import MagicMock, patch
 
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"), patch("utils.time.time", return_value=0.0):
+    with patch("tddrobo.utils.genai.Client"), patch("tddrobo.utils.time.time", return_value=0.0):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
         chunk = MagicMock(text="chunk", candidates=[MagicMock(finish_reason="STOP")])
@@ -767,9 +767,9 @@ def test_utils_genai_client_elapsed_time_zero():
 def test_utils_genai_client_empty_full_text():
     from unittest.mock import MagicMock, patch
 
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
         llm.client.models.generate_content_stream.return_value = []
@@ -781,9 +781,9 @@ def test_utils_genai_client_max_tokens_finish_reason():
 
     import pytest
 
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
         chunk = MagicMock(text="chunk", candidates=[MagicMock(finish_reason="MAX_TOKENS")])
@@ -795,11 +795,11 @@ def test_utils_genai_client_max_tokens_finish_reason():
 def test_utils_legacy_facade_functions():
     from unittest.mock import patch
 
-    from utils import call_llm_with_reasoning, read_artifact
+    from tddrobo.utils import call_llm_with_reasoning, read_artifact
 
     with (
-        patch("utils._default_llm.generate_with_reasoning", return_value="gencode"),
-        patch("utils._default_workspace.read_artifact", return_value="readart"),
+        patch("tddrobo.utils._default_llm.generate_with_reasoning", return_value="gencode"),
+        patch("tddrobo.utils._default_workspace.read_artifact", return_value="readart"),
     ):
         assert call_llm_with_reasoning("prompt") == "gencode"
         assert read_artifact("file") == "readart"
@@ -812,9 +812,9 @@ def test_conftest_fixtures_used(mock_workspace, mock_genai_client, mock_mlflow):
 
 
 def test_genai_client_thinking_level():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
         chunk = MagicMock(text="thoughtful", candidates=[MagicMock(finish_reason="STOP")])
@@ -833,10 +833,10 @@ def test_genai_client_thinking_level():
 def test_genai_client_streaming_dots_newline(capsys):
     import uuid
 
-    import config
-    from utils import GenAIClient
+    from tddrobo import config
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         with patch.object(config, "VERBOSE", True):
             llm = GenAIClient(debug_mode=False)
             llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
@@ -849,10 +849,10 @@ def test_genai_client_streaming_dots_newline(capsys):
 
 
 def test_genai_client_streaming_non_verbose(capsys):
-    import config
-    from utils import GenAIClient
+    from tddrobo import config
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         with patch.object(config, "VERBOSE", False):
             llm = GenAIClient(debug_mode=False)
             llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
@@ -866,10 +866,10 @@ def test_genai_client_streaming_non_verbose(capsys):
 
 
 def test_genai_client_tools_non_verbose(capsys):
-    import config
-    from utils import GenAIClient
+    from tddrobo import config
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         with patch.object(config, "VERBOSE", False):
             llm = GenAIClient(debug_mode=False)
             llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
@@ -891,7 +891,7 @@ def test_genai_client_tools_non_verbose(capsys):
 def test_stream_with_timeout_trigger():
     import pytest
 
-    from utils import stream_with_timeout
+    from tddrobo.utils import stream_with_timeout
 
     def slow_generator():
         import time
@@ -914,9 +914,9 @@ def test_stream_with_timeout_trigger():
 
 
 def test_genai_client_retry_on_timeout():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -929,7 +929,7 @@ def test_genai_client_retry_on_timeout():
         good_chunk = MagicMock(text="success_after_timeout", candidates=[MagicMock(finish_reason="STOP")])
         llm.client.models.generate_content_stream.side_effect = [timeout_stream(), [good_chunk]]
 
-        with patch("utils.time.sleep") as mock_sleep:
+        with patch("tddrobo.utils.time.sleep") as mock_sleep:
             res = llm.call_with_retry("model", "prompt", retries=2, delay=0)
             assert res == "success_after_timeout"
             mock_sleep.assert_called_once()
@@ -940,9 +940,9 @@ def test_genai_client_retry_on_timeout_degeneration():
 
     from google.genai.errors import APIError
 
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -967,7 +967,7 @@ def test_genai_client_retry_on_timeout_degeneration():
 
         llm.client.models.generate_content_stream.side_effect = mock_generate_stream
 
-        with patch("utils.time.sleep") as mock_sleep:
+        with patch("tddrobo.utils.time.sleep") as mock_sleep:
             res = llm.call_with_retry("model", "original_prompt", retries=3, delay=0, temperature=0.1)
             assert res == "success_with_degeneration"
             assert len(calls) == 3
@@ -987,7 +987,7 @@ def test_genai_client_retry_on_timeout_degeneration():
 def test_stream_with_timeout_exception():
     import pytest
 
-    from utils import stream_with_timeout
+    from tddrobo.utils import stream_with_timeout
 
     def error_generator():
         yield "chunk1"
@@ -1002,7 +1002,7 @@ def test_stream_with_timeout_exception():
 
 
 def test_progress_spinner_clear_message(capsys):
-    from utils import ProgressSpinner
+    from tddrobo.utils import ProgressSpinner
 
     spinner = ProgressSpinner("msg")
     spinner.start()
@@ -1012,9 +1012,9 @@ def test_progress_spinner_clear_message(capsys):
 
 
 def test_genai_client_zero_retries():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         res = llm.call_with_retry("model", "prompt", retries=0)
         assert res == ""
@@ -1023,9 +1023,9 @@ def test_genai_client_zero_retries():
 def test_genai_client_init_debug_mode_with_models():
     from unittest.mock import MagicMock, patch
 
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client") as MockClient:
+    with patch("tddrobo.utils.genai.Client") as MockClient:
         mock_model_1 = MagicMock()
         mock_model_1.name = "model-with-action"
         mock_model_1.supported_actions = ["generateContent"]
@@ -1047,10 +1047,10 @@ def test_genai_client_init_debug_mode_with_models():
 def test_genai_client_init_normal_mode_missing_models():
     from unittest.mock import MagicMock, patch
 
-    import config
-    from utils import GenAIClient
+    from tddrobo import config
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client") as MockClient:
+    with patch("tddrobo.utils.genai.Client") as MockClient:
         mock_model_1 = MagicMock()
         mock_model_1.name = "unrelated-model"
 
@@ -1064,10 +1064,10 @@ def test_genai_client_init_normal_mode_missing_models():
 def test_genai_client_init_exception_on_list_models():
     from unittest.mock import patch
 
-    import config
-    from utils import GenAIClient
+    from tddrobo import config
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client") as MockClient:
+    with patch("tddrobo.utils.genai.Client") as MockClient:
         mock_client_instance = MockClient.return_value
         mock_client_instance.models.list.side_effect = Exception("API Error")
 
@@ -1080,11 +1080,11 @@ def test_genai_client_verbose_coverage_various():
 
     from google.genai.errors import APIError
 
-    import config
-    from utils import GenAIClient
+    from tddrobo import config
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
-        with patch("utils.types.GenerateContentConfig"):
+    with patch("tddrobo.utils.genai.Client"):
+        with patch("tddrobo.utils.types.GenerateContentConfig"):
             llm = GenAIClient(debug_mode=True)
             llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -1145,7 +1145,7 @@ def test_genai_client_verbose_coverage_various():
 def test_progress_spinner_tty(capsys):
     import time
 
-    from utils import ProgressSpinner
+    from tddrobo.utils import ProgressSpinner
 
     with patch("sys.stdout.isatty", return_value=True):
         spinner = ProgressSpinner("msg")
@@ -1159,23 +1159,23 @@ def test_progress_spinner_tty(capsys):
 
 
 def test_call_with_retry_tty(capsys):
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
         chunk = MagicMock(text="hello", candidates=[MagicMock(finish_reason="STOP")])
         llm.client.models.generate_content_stream.return_value = [chunk]
         with patch("sys.stdout.isatty", return_value=True):
-            with patch("utils.config.VERBOSE", False):
+            with patch("tddrobo.utils.config.VERBOSE", False):
                 res = llm.call_with_retry("model", "prompt", retries=1)
                 assert res == "hello"
 
 
 def test_call_with_retry_thinking_parts(capsys):
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -1196,16 +1196,16 @@ def test_call_with_retry_thinking_parts(capsys):
         chunk2 = MagicMock(text="", candidates=[MagicMock(finish_reason="STOP")])
 
         llm.client.models.generate_content_stream.return_value = [chunk1, chunk2]
-        with patch("utils.config.VERBOSE", False):
+        with patch("tddrobo.utils.config.VERBOSE", False):
             with patch("sys.stdout.isatty", return_value=True):
                 res = llm.call_with_retry("model", "prompt", retries=1)
                 assert res == "The answer is 42"
 
 
 def test_call_with_retry_thinking_non_tty_large(capsys):
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -1221,16 +1221,16 @@ def test_call_with_retry_thinking_non_tty_large(capsys):
         chunk2 = MagicMock(text="done", candidates=[MagicMock(finish_reason="STOP")])
 
         llm.client.models.generate_content_stream.return_value = [chunk1, chunk2]
-        with patch("utils.config.VERBOSE", False):
+        with patch("tddrobo.utils.config.VERBOSE", False):
             with patch("sys.stdout.isatty", return_value=False):
                 res = llm.call_with_retry("model", "prompt", retries=1)
                 assert res == "done"
 
 
 def test_call_with_retry_large_generation_non_tty(capsys):
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -1239,19 +1239,19 @@ def test_call_with_retry_large_generation_non_tty(capsys):
         chunk2 = MagicMock(text="b", candidates=[MagicMock(finish_reason="STOP")])
 
         llm.client.models.generate_content_stream.return_value = [chunk1, chunk2]
-        with patch("utils.config.VERBOSE", False):
+        with patch("tddrobo.utils.config.VERBOSE", False):
             with patch("sys.stdout.isatty", return_value=False):
                 res = llm.call_with_retry("model", "prompt", retries=1)
                 assert res == large_text + "b"
 
 
 def test_call_with_retry_connection_error():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
     class MockConnectionError(Exception):
         pass
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -1263,7 +1263,7 @@ def test_call_with_retry_connection_error():
         good_chunk = MagicMock(text="recovered", candidates=[MagicMock(finish_reason="STOP")])
         llm.client.models.generate_content_stream.side_effect = [err_stream(), [good_chunk]]
 
-        with patch("utils.time.sleep") as mock_sleep:
+        with patch("tddrobo.utils.time.sleep") as mock_sleep:
             res = llm.call_with_retry("model", "prompt", retries=2, delay=0)
             assert res == "recovered"
             assert mock_sleep.call_count >= 1
@@ -1274,7 +1274,7 @@ def test_apply_search_replace_blocks():
 
     import pytest
 
-    from utils import apply_search_replace_blocks
+    from tddrobo.utils import apply_search_replace_blocks
 
     # 1. Happy path - single replacement
     original = "def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b"
@@ -1506,7 +1506,7 @@ def test_apply_search_replace_blocks():
 
 
 def test_find_exact_match_lines():
-    from utils import _find_exact_match_lines
+    from tddrobo.utils import _find_exact_match_lines
 
     assert _find_exact_match_lines("a\nb\na", "") == []
     assert _find_exact_match_lines("a\nb\na", "a") == [1, 3]
@@ -1515,7 +1515,7 @@ def test_find_exact_match_lines():
 
 
 def test_format_match_contexts():
-    from utils import _format_match_contexts
+    from tddrobo.utils import _format_match_contexts
 
     code = "line1\nline2\nline3\nline4\nline5\nline6"
     res = _format_match_contexts(code, [2, 5], "line2")
@@ -1529,9 +1529,9 @@ def test_format_match_contexts():
 
 
 def test_run_bc_command():
-    from utils import run_bc_command
+    from tddrobo.utils import run_bc_command
 
-    with patch("utils.evaluate_math_expression") as mock_eval:
+    with patch("tddrobo.utils.evaluate_math_expression") as mock_eval:
         mock_eval.return_value = "42"
         assert run_bc_command("1+1") == "42"
         mock_eval.assert_called_once_with("1+1")
@@ -1540,7 +1540,7 @@ def test_run_bc_command():
 def test_copy_dict_robust():
     from collections import defaultdict
 
-    from utils import _copy_dict_robust
+    from tddrobo.utils import _copy_dict_robust
 
     # Test list handling
     assert _copy_dict_robust([1, 2, [3, 4]]) == [1, 2, [3, 4]]
@@ -1575,15 +1575,15 @@ def test_copy_dict_robust():
 
 
 def test_genai_client_429_retry_handling():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
     class MockAPIError(Exception):
         def __init__(self, message, code):
             self.code = code
             super().__init__(message)
 
-    with patch("utils.APIError", MockAPIError), patch("utils.ClientError", MockAPIError):
-        with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.APIError", MockAPIError), patch("tddrobo.utils.ClientError", MockAPIError):
+        with patch("tddrobo.utils.genai.Client"):
             llm = GenAIClient(debug_mode=False)
             llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -1593,7 +1593,7 @@ def test_genai_client_429_retry_handling():
 
             # Test case 1: 429 with suggested delay
             llm.client.models.generate_content_stream.side_effect = [err_429_with_delay, [good_chunk]]
-            with patch("utils.time.sleep") as mock_sleep, patch("utils.config.VERBOSE", False):
+            with patch("tddrobo.utils.time.sleep") as mock_sleep, patch("tddrobo.utils.config.VERBOSE", False):
                 res = llm.call_with_retry("model", "prompt", retries=2, delay=2)
                 assert res == "success"
                 assert mock_sleep.call_count == 1
@@ -1603,7 +1603,7 @@ def test_genai_client_429_retry_handling():
 
             # Test case 2: 429 without suggested delay (exponential backoff)
             llm.client.models.generate_content_stream.side_effect = [err_429_no_delay, [good_chunk]]
-            with patch("utils.time.sleep") as mock_sleep, patch("utils.config.VERBOSE", False):
+            with patch("tddrobo.utils.time.sleep") as mock_sleep, patch("tddrobo.utils.config.VERBOSE", False):
                 res = llm.call_with_retry("model", "prompt", retries=2, delay=2)
                 assert res == "success"
                 assert mock_sleep.call_count == 1
@@ -1613,13 +1613,13 @@ def test_genai_client_429_retry_handling():
 
 
 def test_find_flexible_match_empty_search():
-    from utils import _find_flexible_match
+    from tddrobo.utils import _find_flexible_match
 
     assert _find_flexible_match("some code", "") == (None, None)
 
 
 def test_find_flexible_match_fallback_comments_only():
-    from utils import _find_flexible_match
+    from tddrobo.utils import _find_flexible_match
 
     # Search block contains only comments and empty lines
     code = "line1\n\n# comment here\nline3"
@@ -1630,7 +1630,7 @@ def test_find_flexible_match_fallback_comments_only():
 
 
 def test_find_flexible_match_fallback_comments_multiple_matches():
-    from utils import _find_flexible_match
+    from tddrobo.utils import _find_flexible_match
 
     code = "# comment\n# comment"
     search = "# comment"
@@ -1638,7 +1638,7 @@ def test_find_flexible_match_fallback_comments_multiple_matches():
 
 
 def test_find_flexible_match_fallback_no_match():
-    from utils import _find_flexible_match
+    from tddrobo.utils import _find_flexible_match
 
     code = "line1\nline2"
     search = "# non existent comment"
@@ -1646,7 +1646,7 @@ def test_find_flexible_match_fallback_no_match():
 
 
 def test_adjust_indentation_corner_cases():
-    from utils import _adjust_indentation
+    from tddrobo.utils import _adjust_indentation
 
     # original_matched_block is empty (should return 0 diff indent)
     assert _adjust_indentation("replace", "search", "") == "replace"
@@ -1658,9 +1658,9 @@ def test_adjust_indentation_corner_cases():
 
 
 def test_genai_client_streaming_with_parts():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -1684,7 +1684,7 @@ def test_genai_client_streaming_with_parts():
         llm.client.models.generate_content_stream.return_value = [chunk1, chunk2, chunk3]
 
         # Call call_with_retry with thinking level to trigger thinking config and parts mapping
-        with patch("utils.config.VERBOSE", False):
+        with patch("tddrobo.utils.config.VERBOSE", False):
             res = llm.call_with_retry("gemma-model", "prompt", thinking_level="high", retries=1)
             assert res == "json output"
 
@@ -1692,9 +1692,9 @@ def test_genai_client_streaming_with_parts():
 def test_call_with_retry_asymptotic_temperature():
     from unittest.mock import MagicMock, patch
 
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -1715,8 +1715,8 @@ def test_call_with_retry_asymptotic_temperature():
 
         llm.client.models.generate_content_stream.side_effect = mock_generate
 
-        with patch("utils.time.sleep") as mock_sleep:
-            with patch("utils.config.VERBOSE", True):
+        with patch("tddrobo.utils.time.sleep") as mock_sleep:
+            with patch("tddrobo.utils.config.VERBOSE", True):
                 res = llm.call_with_retry("model", "prompt", retries=5, delay=0)
                 assert res == "success_response"
 
@@ -1736,9 +1736,9 @@ def test_call_with_retry_asymptotic_temperature():
 def test_call_with_retry_degen_warning_injection():
     from unittest.mock import MagicMock, patch
 
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -1758,8 +1758,8 @@ def test_call_with_retry_degen_warning_injection():
 
         llm.client.models.generate_content_stream.side_effect = mock_generate
 
-        with patch("utils.time.sleep") as mock_sleep:
-            with patch("utils.config.VERBOSE", True):
+        with patch("tddrobo.utils.time.sleep") as mock_sleep:
+            with patch("tddrobo.utils.config.VERBOSE", True):
                 res = llm.call_with_retry("model", "original_prompt", retries=3, delay=0)
                 assert res == "success_response"
 
@@ -1773,9 +1773,9 @@ def test_call_with_retry_degen_warning_injection():
 
 
 def test_check_repetition_patterns():
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
 
         # Test long pattern repetition (length >= 15, repeated >= 4 times)
@@ -1815,9 +1815,9 @@ def test_check_repetition_patterns():
 def test_call_with_retry_fallback():
     from unittest.mock import MagicMock, patch
 
-    from utils import MODEL_PRIMARY, MODEL_SECONDARY, GenAIClient
+    from tddrobo.utils import MODEL_PRIMARY, MODEL_SECONDARY, GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
         llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -1837,8 +1837,8 @@ def test_call_with_retry_fallback():
 
         llm.client.models.generate_content_stream.side_effect = mock_generate
 
-        with patch("utils.time.sleep") as mock_sleep:
-            with patch("utils.config.VERBOSE", True):
+        with patch("tddrobo.utils.time.sleep") as mock_sleep:
+            with patch("tddrobo.utils.config.VERBOSE", True):
                 res = llm.call_with_retry(MODEL_SECONDARY, "prompt", retries=10, delay=0)
                 assert res == "fallback_success"
 
@@ -1854,7 +1854,7 @@ def test_call_with_retry_fallback():
 def test_sanitize_unpicklable():
     import threading
 
-    from utils import _sanitize_unpicklable
+    from tddrobo.utils import _sanitize_unpicklable
 
     # 1. Normal values
     assert _sanitize_unpicklable(1) == 1
@@ -1923,21 +1923,21 @@ def test_call_llm_structured_retry():
 
     from pydantic import BaseModel, Field
 
-    from utils import call_llm_structured
+    from tddrobo.utils import call_llm_structured
 
     class DummySchema(BaseModel):
         val: int = Field(..., description="A dummy integer value")
 
     # 1. Test case: successful on retry
-    with patch("utils.call_llm_with_reasoning") as mock_reason:
+    with patch("tddrobo.utils.call_llm_with_reasoning") as mock_reason:
         # First call returns invalid JSON or schema mismatch
         # Second call returns valid JSON matching DummySchema
         mock_reason.side_effect = [
             '{"val": "not_an_int"}',  # Validation error (val must be int)
             '{"val": 42}',
         ]
-        with patch("utils.time.sleep") as mock_sleep:
-            import config
+        with patch("tddrobo.utils.time.sleep") as mock_sleep:
+            from tddrobo import config
 
             res = call_llm_structured("dummy prompt", DummySchema, model_name=config.MODEL_PRIMARY)
             assert res.val == 42
@@ -1945,13 +1945,13 @@ def test_call_llm_structured_retry():
             mock_sleep.assert_called_once()
 
     # 2. Test case: failing completely after max retries
-    with patch("utils.call_llm_with_reasoning") as mock_reason:
+    with patch("tddrobo.utils.call_llm_with_reasoning") as mock_reason:
         mock_reason.return_value = '{"val": "still_not_an_int"}'
-        with patch("utils.time.sleep") as mock_sleep:
+        with patch("tddrobo.utils.time.sleep") as mock_sleep:
             import pytest
             from pydantic import ValidationError
 
-            import config
+            from tddrobo import config
 
             with pytest.raises(ValidationError):
                 call_llm_structured("dummy prompt", DummySchema, model_name=config.MODEL_PRIMARY)
@@ -1964,9 +1964,9 @@ def test_check_json_repetition_braces_in_strings():
 
     import pytest
 
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client"):
+    with patch("tddrobo.utils.genai.Client"):
         llm = GenAIClient(debug_mode=False)
 
         # 1. Test case: JSON object containing nested braces inside string literal
@@ -2027,15 +2027,15 @@ def test_fallback_custom_threshold_and_error_isolation():
     import pytest
     from google.genai.errors import APIError
 
-    import config
-    from utils import GenAIClient
+    from tddrobo import config
+    from tddrobo.utils import GenAIClient
 
     # Temporary patch config variables
     orig_fallback_threshold = config.LLM_FALLBACK_THRESHOLD
     config.LLM_FALLBACK_THRESHOLD = 3
 
     try:
-        with patch("utils.genai.Client"):
+        with patch("tddrobo.utils.genai.Client"):
             llm = GenAIClient(debug_mode=False)
             llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
 
@@ -2050,7 +2050,7 @@ def test_fallback_custom_threshold_and_error_isolation():
 
             llm.client.models.generate_content_stream.side_effect = mock_generate_api_err
 
-            with patch("utils.time.sleep") as mock_sleep:
+            with patch("tddrobo.utils.time.sleep") as mock_sleep:
                 with pytest.raises(APIError):
                     # Try with 5 retries. With threshold = 3, if APIError triggered fallback,
                     # it would have switched to primary model.
@@ -2076,7 +2076,7 @@ def test_fallback_custom_threshold_and_error_isolation():
 
             llm.client.models.generate_content_stream.side_effect = mock_generate_degen
 
-            with patch("utils.time.sleep") as mock_sleep_degen:
+            with patch("tddrobo.utils.time.sleep") as mock_sleep_degen:
                 res = llm.call_with_retry(config.MODEL_SECONDARY, "prompt", retries=5, delay=0)
                 assert res == "success"
 

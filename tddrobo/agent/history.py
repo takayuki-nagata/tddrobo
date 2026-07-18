@@ -4,9 +4,9 @@ import json
 import os
 import shutil
 
-import config
-from logger import print
-from schema import TDDState
+from tddrobo import config
+from tddrobo.logger import print
+from tddrobo.schema import TDDState
 
 
 def save_history_snapshot(

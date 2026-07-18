@@ -2,8 +2,8 @@ from unittest.mock import patch
 
 import pytest
 
-import config
-from logger import logger
+from tddrobo import config
+from tddrobo.logger import logger
 
 
 @pytest.fixture(autouse=True)

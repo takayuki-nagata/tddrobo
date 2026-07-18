@@ -3,10 +3,10 @@ import os
 import sys
 
 # Ensure tddrobo directory is in python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from agent import TDDAgent
-from utils import FileMemorySaver
+from tddrobo.agent import TDDAgent
+from tddrobo.utils import FileMemorySaver
 
 
 def main():

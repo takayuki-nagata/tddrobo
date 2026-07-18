@@ -1,4 +1,4 @@
-from agent.prompt_builder import (
+from tddrobo.agent.prompt_builder import (
     build_architecture_audit_prompt,
     build_design_prompt,
     build_implementation_prompt,

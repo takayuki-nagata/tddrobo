@@ -4,7 +4,7 @@ import sys
 import threading
 import time
 
-import config
+from tddrobo import config
 
 _thread_local = threading.local()
 

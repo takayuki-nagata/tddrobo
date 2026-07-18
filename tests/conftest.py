@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import mlflow
 import pytest
 
-import config
+from tddrobo import config
 
 mlflow.tracing.disable()
 # Suppress informational messages about trace logging queues shutting down
@@ -37,9 +37,9 @@ def mock_artifacts_dir(tmp_path):
     test_session_dir = os.path.join(test_artifacts_dir, test_session_id)
 
     with (
-        patch("config.TDD_BASE_ARTIFACTS_DIR", test_artifacts_dir),
-        patch("config.SESSION_ID", test_session_id),
-        patch("config.ARTIFACTS_DIR", test_session_dir),
+        patch("tddrobo.config.TDD_BASE_ARTIFACTS_DIR", test_artifacts_dir),
+        patch("tddrobo.config.SESSION_ID", test_session_id),
+        patch("tddrobo.config.ARTIFACTS_DIR", test_session_dir),
     ):
         old_base = config.TDD_BASE_ARTIFACTS_DIR
         old_session = config.SESSION_ID
@@ -65,7 +65,7 @@ def mock_artifacts_dir(tmp_path):
 @pytest.fixture
 def mock_workspace(tmp_path):
     """Provide a Workspace instance operating in an isolated temporary directory."""
-    from utils import Workspace
+    from tddrobo.utils import Workspace
 
     return Workspace(str(tmp_path))
 
@@ -73,9 +73,9 @@ def mock_workspace(tmp_path):
 @pytest.fixture
 def mock_genai_client():
     """Provide a GenAIClient with the Google GenAI SDK completely mocked out."""
-    from utils import GenAIClient
+    from tddrobo.utils import GenAIClient
 
-    with patch("utils.genai.Client") as MockClient:
+    with patch("tddrobo.utils.genai.Client") as MockClient:
         # Prevent actual API calls during tests
         client = GenAIClient(debug_mode=False)
         yield client, MockClient
@@ -84,5 +84,5 @@ def mock_genai_client():
 @pytest.fixture
 def mock_mlflow():
     """Mock MLflow tracking to prevent polluting the tracking server during tests."""
-    with patch("utils.mlflow") as mock_mlf:
+    with patch("tddrobo.utils.mlflow") as mock_mlf:
         yield mock_mlf

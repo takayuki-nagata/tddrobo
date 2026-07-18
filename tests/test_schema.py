@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from schema import FilePlan, TestCase
+from tddrobo.schema import FilePlan, TestCase
 
 
 def test_file_plan_schema():

@@ -1,6 +1,6 @@
 from langgraph.graph import END, StateGraph
 
-from schema import TDDState
+from tddrobo.schema import TDDState
 
 from .edges import (
     should_continue_integration,

@@ -2,11 +2,11 @@ import os
 import sys
 
 # Ensure tddrobo root is in path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-import config
-from schema import DesignDocument
-from utils import call_llm_structured
+from tddrobo import config
+from tddrobo.schema import DesignDocument
+from tddrobo.utils import call_llm_structured
 
 
 def run_test(prompt_template_path: str, label: str):

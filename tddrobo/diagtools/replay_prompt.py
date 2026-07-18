@@ -59,11 +59,11 @@ def main():
     # Import config and utils locally to delay model initialization
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, root_dir)
-    import config
+    from tddrobo import config
 
     # Ensure config initializes correctly
     config.DEBUG_MODE = True
-    from utils import call_llm_standard, call_llm_with_reasoning
+    from tddrobo.utils import call_llm_standard, call_llm_with_reasoning
 
     if not args.trace and not args.prompt_file:
         print("Error: Either --trace or --prompt-file must be specified.", file=sys.stderr)
@@ -141,7 +141,7 @@ def main():
     # Load response schema if specified
     response_schema = None
     if args.schema:
-        import schema
+        from tddrobo import schema
 
         if not hasattr(schema, args.schema):
             print(f"Error: Schema class '{args.schema}' not found in schema module.", file=sys.stderr)

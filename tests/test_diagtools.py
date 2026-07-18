@@ -7,8 +7,8 @@ import pytest
 
 # Ensure diagtools is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from diagtools.inspect_checkpoint import main as inspect_checkpoint_main
-from diagtools.replay_prompt import main
+from tddrobo.diagtools.inspect_checkpoint import main as inspect_checkpoint_main
+from tddrobo.diagtools.replay_prompt import main
 
 
 def test_replay_prompt_missing_file(capsys):
@@ -35,8 +35,8 @@ def test_replay_prompt_invalid_format(tmp_path, capsys):
         assert "Error: Invalid trace request file format" in captured.err
 
 
-@patch("utils.call_llm_with_reasoning")
-@patch("utils.call_llm_standard")
+@patch("tddrobo.utils.call_llm_with_reasoning")
+@patch("tddrobo.utils.call_llm_standard")
 def test_replay_prompt_success(mock_call_standard, mock_call_reasoning, tmp_path, capsys):
     mock_call_reasoning.return_value = "reasoning response"
     mock_call_standard.return_value = "standard response"
@@ -93,7 +93,7 @@ def test_replay_prompt_success(mock_call_standard, mock_call_reasoning, tmp_path
         mock_call_standard.assert_called_once_with("hello gemini", response_schema=None, temperature=0.0)
 
 
-@patch("utils.call_llm_standard")
+@patch("tddrobo.utils.call_llm_standard")
 def test_replay_prompt_llm_error(mock_call_standard, tmp_path, capsys):
     mock_call_standard.side_effect = Exception("API Error")
 
@@ -110,8 +110,8 @@ def test_replay_prompt_llm_error(mock_call_standard, tmp_path, capsys):
         assert "Error calling LLM: API Error" in captured.err
 
 
-@patch("utils.call_llm_with_reasoning")
-@patch("utils.call_llm_standard")
+@patch("tddrobo.utils.call_llm_with_reasoning")
+@patch("tddrobo.utils.call_llm_standard")
 def test_replay_prompt_extended(mock_call_standard, mock_call_reasoning, tmp_path, capsys):
     mock_call_reasoning.return_value = "reasoning response"
     mock_call_standard.return_value = "standard response"
@@ -204,8 +204,8 @@ def test_inspect_checkpoint_missing_file():
         assert excinfo.value.code == 1
 
 
-@patch("diagtools.inspect_checkpoint.FileMemorySaver")
-@patch("diagtools.inspect_checkpoint.TDDAgent")
+@patch("tddrobo.diagtools.inspect_checkpoint.FileMemorySaver")
+@patch("tddrobo.diagtools.inspect_checkpoint.TDDAgent")
 def test_inspect_checkpoint_keys_and_dump(mock_agent_class, mock_saver_class, capsys):
     mock_agent = mock_agent_class.return_value
     mock_state_obj = mock_agent.app.get_state.return_value
@@ -259,8 +259,8 @@ def test_inspect_checkpoint_keys_and_dump(mock_agent_class, mock_saver_class, ca
             assert "Warning: No state values found in checkpoint" in captured.out
 
 
-@patch("utils.call_llm_with_reasoning")
-@patch("utils.call_llm_standard")
+@patch("tddrobo.utils.call_llm_with_reasoning")
+@patch("tddrobo.utils.call_llm_standard")
 def test_replay_prompt_new_features(mock_call_standard, mock_call_reasoning, tmp_path, capsys):
     mock_call_reasoning.return_value = "reasoning response"
     mock_call_standard.return_value = "standard response"
@@ -318,7 +318,7 @@ def test_replay_prompt_new_features(mock_call_standard, mock_call_reasoning, tmp
         "0.7",
         "--standard",
     ]
-    from schema import TestPlan
+    from tddrobo.schema import TestPlan
 
     with patch("sys.argv", test_args_schema_temp):
         main()
@@ -356,7 +356,7 @@ def test_inspect_traces_offline_fallback(mock_connect, mock_search, mock_get_exp
 
     test_args = ["inspect_traces.py"]
     with patch("sys.argv", test_args):
-        from diagtools.inspect_traces import main as inspect_traces_main
+        from tddrobo.diagtools.inspect_traces import main as inspect_traces_main
 
         inspect_traces_main()
         captured = capsys.readouterr()
@@ -368,7 +368,7 @@ def test_inspect_traces_offline_fallback(mock_connect, mock_search, mock_get_exp
 def test_inspect_history_directory_missing():
     test_args = ["inspect_history.py", "--history-dir", "non_existent_directory"]
     with patch("sys.argv", test_args):
-        from diagtools.inspect_history import main as inspect_history_main
+        from tddrobo.diagtools.inspect_history import main as inspect_history_main
 
         with pytest.raises(SystemExit) as excinfo:
             inspect_history_main()
@@ -396,7 +396,7 @@ def test_inspect_history_list_and_diff(tmp_path, capsys):
     test_file = history_dir / "test_py_bc_req002_d002_unit_iter001.py"
     test_file.write_text("def test_run(): pass\n", encoding="utf-8")
 
-    from diagtools.inspect_history import main as inspect_history_main
+    from tddrobo.diagtools.inspect_history import main as inspect_history_main
 
     # 1. Test --list
     test_args_list = ["inspect_history.py", "--history-dir", str(history_dir), "--list"]

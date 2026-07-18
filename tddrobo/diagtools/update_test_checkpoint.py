@@ -1,10 +1,10 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from agent import TDDAgent
-from utils import FileMemorySaver
+from tddrobo.agent import TDDAgent
+from tddrobo.utils import FileMemorySaver
 
 checkpoint_path = "artifacts/bc_clone_session/checkpoint.pkl"
 test_file_path = "artifacts/bc_clone_session/test_py_bc_req012_integration.py"

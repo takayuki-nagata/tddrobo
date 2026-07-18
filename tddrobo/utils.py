@@ -15,8 +15,8 @@ from google.genai import types
 from google.genai.errors import APIError, ClientError
 from langgraph.checkpoint.memory import MemorySaver
 
-import config
-from logger import print
+from tddrobo import config
+from tddrobo.logger import print
 
 logging.getLogger("mlflow").setLevel(logging.ERROR)
 

@@ -9,7 +9,7 @@ import subprocess
 import sys
 import typing
 
-import config
+from tddrobo import config
 
 
 def run_bc_command(cmd: list[str], input_code: str) -> tuple[int, str, str]:
@@ -205,7 +205,7 @@ e(1)
 
 
 if __name__ == "__main__":
-    from demo_runner import run_demo
+    from tddrobo.demo_runner import run_demo
 
     try:
         run_demo(

@@ -1,10 +1,10 @@
 import json
 import re
 
-import config
-from logger import print
-from prompts import EXTRACT_ORACLE_TARGET_PROMPT
-from schema import OracleAssertionTarget, OracleDiscrepancyJudgment, TDDState
+from tddrobo import config
+from tddrobo.logger import print
+from tddrobo.prompts import EXTRACT_ORACLE_TARGET_PROMPT
+from tddrobo.schema import OracleAssertionTarget, OracleDiscrepancyJudgment, TDDState
 
 from .runner import (
     _call_llm_structured,
@@ -134,7 +134,7 @@ def _judge_oracle_discrepancy_with_llm(
     """Use the primary LLM to judge whether an oracle discrepancy is a core design
     flaw or a test plan representation issue.
     """
-    from prompts import JUDGE_ORACLE_DISCREPANCY_PROMPT
+    from tddrobo.prompts import JUDGE_ORACLE_DISCREPANCY_PROMPT
 
     tc_formatted = json.dumps(test_case_dict, indent=2, ensure_ascii=False)
 

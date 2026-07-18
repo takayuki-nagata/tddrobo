@@ -1,13 +1,13 @@
 from unittest.mock import patch
 
-from agent import (
+from tddrobo.agent import (
     _has_implementation_exceptions,
     generate_integration_bug_report,
     generate_unit_bug_report,
     should_fix_integration_tests_or_impl,
     should_fix_unit_tests_or_impl,
 )
-from schema import BugReport, DesignDocument, TDDState
+from tddrobo.schema import BugReport, DesignDocument, TDDState
 
 
 def test_has_implementation_exceptions():
@@ -40,8 +40,8 @@ E       AssertionError: assert '7' == '8'
     assert _has_implementation_exceptions("", "py_bc.py") is False
 
 
-@patch("agent._run_oracle_verification_on_failures")
-@patch("agent._call_llm_structured")
+@patch("tddrobo.agent._run_oracle_verification_on_failures")
+@patch("tddrobo.agent._call_llm_structured")
 def test_generate_unit_bug_report_with_exception(mock_call_llm, mock_oracle):
     mock_oracle.return_value = "ORACLE VERIFICATION FEEDBACK: Discrepancy found."
 
@@ -69,8 +69,8 @@ def test_generate_unit_bug_report_with_exception(mock_call_llm, mock_oracle):
     assert res["next_action"] == "implement_logic"
 
 
-@patch("agent._run_oracle_verification_on_failures")
-@patch("agent._call_llm_structured")
+@patch("tddrobo.agent._run_oracle_verification_on_failures")
+@patch("tddrobo.agent._call_llm_structured")
 def test_generate_unit_bug_report_without_exception(mock_call_llm, mock_oracle):
     mock_oracle.return_value = "ORACLE VERIFICATION FEEDBACK: Discrepancy found."
 
@@ -98,8 +98,8 @@ def test_generate_unit_bug_report_without_exception(mock_call_llm, mock_oracle):
     assert res["next_action"] == "generate_tests"
 
 
-@patch("agent._run_oracle_verification_on_failures")
-@patch("agent._call_llm_structured")
+@patch("tddrobo.agent._run_oracle_verification_on_failures")
+@patch("tddrobo.agent._call_llm_structured")
 def test_generate_integration_bug_report_with_exception(mock_call_llm, mock_oracle):
     mock_oracle.return_value = "ORACLE VERIFICATION FEEDBACK: Discrepancy found."
 
@@ -124,7 +124,7 @@ def test_generate_integration_bug_report_with_exception(mock_call_llm, mock_orac
     assert res["next_action"] == "implement_logic"
 
 
-@patch("agent._detect_toggle_loop")
+@patch("tddrobo.agent._detect_toggle_loop")
 def test_should_fix_unit_tests_or_impl_loop(mock_detect_loop):
     # If loop is detected, should routing go to analyze_architecture?
     mock_detect_loop.return_value = True
@@ -140,7 +140,7 @@ def test_should_fix_unit_tests_or_impl_loop(mock_detect_loop):
     assert res_b == "analyze_architecture"
 
 
-@patch("agent._detect_toggle_loop")
+@patch("tddrobo.agent._detect_toggle_loop")
 def test_should_fix_integration_tests_or_impl_loop(mock_detect_loop):
     mock_detect_loop.return_value = True
 
@@ -155,7 +155,7 @@ def test_should_fix_integration_tests_or_impl_loop(mock_detect_loop):
     assert res_b == "analyze_architecture"
 
 
-@patch("agent._detect_toggle_loop")
+@patch("tddrobo.agent._detect_toggle_loop")
 def test_should_fix_unit_tests_or_impl_no_loop(mock_detect_loop):
     mock_detect_loop.return_value = False
 
@@ -170,10 +170,10 @@ def test_should_fix_unit_tests_or_impl_no_loop(mock_detect_loop):
     assert res_b == "implement_initial_logic"
 
 
-@patch("agent.open", create=True)
-@patch("agent._call_llm_structured")
+@patch("tddrobo.agent.open", create=True)
+@patch("tddrobo.agent._call_llm_structured")
 def test_update_design_for_req_skip_condition(mock_call_llm, mock_open):
-    from agent import update_design_for_req
+    from tddrobo.agent import update_design_for_req
 
     # Mock LLM and file open
     mock_call_llm.return_value = DesignDocument(
@@ -213,11 +213,11 @@ def test_update_design_for_req_skip_condition(mock_call_llm, mock_open):
     assert mock_call_llm.call_count == 1
 
 
-@patch("agent._run_oracle_verification_on_failures")
-@patch("agent._call_llm_structured")
-@patch("agent._get_combined_tests_code")
+@patch("tddrobo.agent._run_oracle_verification_on_failures")
+@patch("tddrobo.agent._call_llm_structured")
+@patch("tddrobo.agent._get_combined_tests_code")
 def test_oracle_discrepancy_clear_lifecycle(mock_get_combined_tests, mock_call_llm, mock_oracle):
-    from agent import analyze_architecture
+    from tddrobo.agent import analyze_architecture
 
     mock_oracle.return_value = "No discrepancies"
     bug_report = BugReport(
@@ -252,7 +252,7 @@ def test_oracle_discrepancy_clear_lifecycle(mock_get_combined_tests, mock_call_l
     )
 
     # Mock ArchitectureAudit LLM call
-    from schema import ArchitectureAudit as AuditSchema
+    from tddrobo.schema import ArchitectureAudit as AuditSchema
 
     mock_call_llm.return_value = AuditSchema(
         classification="architectural_bottleneck",

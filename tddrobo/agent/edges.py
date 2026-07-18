@@ -3,9 +3,9 @@ from typing import cast
 
 from langgraph.graph import END
 
-import config
-from logger import print
-from schema import TDDState
+from tddrobo import config
+from tddrobo.logger import print
+from tddrobo.schema import TDDState
 
 from .runner import _detect_toggle_loop
 

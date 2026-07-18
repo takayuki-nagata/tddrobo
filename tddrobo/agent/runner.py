@@ -8,10 +8,10 @@ import sys
 import threading
 from typing import Any, cast
 
-import config
-from logger import print
-from schema import TDDState
-from utils import call_llm_structured, call_llm_text, call_llm_with_reasoning
+from tddrobo import config
+from tddrobo.logger import print
+from tddrobo.schema import TDDState
+from tddrobo.utils import call_llm_structured, call_llm_text, call_llm_with_reasoning
 
 from .history import save_history_snapshot
 

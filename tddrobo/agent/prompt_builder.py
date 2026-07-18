@@ -1,5 +1,5 @@
-import config
-from prompts import (
+from tddrobo import config
+from tddrobo.prompts import (
     ANALYZE_ARCHITECTURE_PROMPT,
     GENERATE_DESIGN_PROMPT,
     GENERATE_DESIGN_REFACTOR_DIRECTIVE,
@@ -25,7 +25,7 @@ from prompts import (
     REFACTOR_LOGIC_FIX_PROMPT,
     REFACTOR_LOGIC_PROMPT,
 )
-from utils import add_line_numbers
+from tddrobo.utils import add_line_numbers
 
 
 def build_test_plan_prompt(state, phase, target_req_str, oracle_constraints, is_fix=False, review_feedback=""):

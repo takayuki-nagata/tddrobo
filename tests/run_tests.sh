@@ -2,6 +2,11 @@
 
 set -e
 
+# Determine project root directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+cd "$ROOT_DIR"
+
 # Find python
 if [ -d ".venv" ]; then
     PYTHON=".venv/bin/python"
@@ -20,6 +25,9 @@ $PYTHON -m mypy .
 
 echo "=== 🧪 Running Pytest ==="
 $PYTHON -m pytest --cov=. --cov-report=term-missing --cov-fail-under=100
+
+echo "=== 📊 Generating Workflow Graph ==="
+$PYTHON cli.py --draw-graph
 
 echo ""
 echo "=== ✅ All checks passed successfully! 🎉 ==="

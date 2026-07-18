@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from cli import main
-from schema import (
+from tddrobo.schema import (
     BugReport,
     DesignDocument,
     DesignReviewReport,
@@ -24,8 +24,8 @@ def e2e_env(tmp_path):
     and mock MLflow to prevent tracking during E2E tests.
     """
     with (
-        patch("config.ARTIFACTS_DIR", str(tmp_path)),
-        patch("config.TDD_BASE_ARTIFACTS_DIR", str(tmp_path)),
+        patch("tddrobo.config.ARTIFACTS_DIR", str(tmp_path)),
+        patch("tddrobo.config.TDD_BASE_ARTIFACTS_DIR", str(tmp_path)),
         patch("mlflow.start_run"),
         patch("mlflow.log_param"),
         patch("mlflow.log_metric"),
@@ -75,11 +75,11 @@ def test_e2e_happy_path(e2e_env):
         return "# Mocked README\nThis is a mocked project."
 
     with (
-        patch("utils._default_llm.generate_with_reasoning", side_effect=mock_llm_reasoning),
-        patch("utils._default_llm.generate_standard", side_effect=mock_llm_standard),
-        patch("agent.requests.get") as mock_get,
-        patch("agent.subprocess.run") as mock_run,
-        patch("agent.subprocess.Popen") as mock_popen,
+        patch("tddrobo.utils._default_llm.generate_with_reasoning", side_effect=mock_llm_reasoning),
+        patch("tddrobo.utils._default_llm.generate_standard", side_effect=mock_llm_standard),
+        patch("tddrobo.agent.requests.get") as mock_get,
+        patch("tddrobo.agent.subprocess.run") as mock_run,
+        patch("tddrobo.agent.subprocess.Popen") as mock_popen,
     ):
         # Mock requests.get to return a dummy specification
         mock_response = MagicMock()
@@ -107,7 +107,7 @@ def test_e2e_happy_path(e2e_env):
         assert final_state.get("iterations", 0) == 0
 
         # Verify that expected artifacts were correctly saved to the session directory
-        import config
+        from tddrobo import config
 
         session_dir = config.ARTIFACTS_DIR
         assert os.path.exists(os.path.join(session_dir, "app.py"))
@@ -169,11 +169,11 @@ def test_e2e_recovery_path(e2e_env):
         return "# Mocked README\nThis is a mocked project."
 
     with (
-        patch("utils._default_llm.generate_with_reasoning", side_effect=mock_llm_reasoning),
-        patch("utils._default_llm.generate_standard", side_effect=mock_llm_standard),
-        patch("agent.requests.get") as mock_get,
-        patch("agent.subprocess.run") as mock_run,
-        patch("agent.subprocess.Popen") as mock_popen,
+        patch("tddrobo.utils._default_llm.generate_with_reasoning", side_effect=mock_llm_reasoning),
+        patch("tddrobo.utils._default_llm.generate_standard", side_effect=mock_llm_standard),
+        patch("tddrobo.agent.requests.get") as mock_get,
+        patch("tddrobo.agent.subprocess.run") as mock_run,
+        patch("tddrobo.agent.subprocess.Popen") as mock_popen,
     ):
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -209,13 +209,18 @@ def test_e2e_recovery_path(e2e_env):
 def test_cli_draw_graph(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     mock_graph = MagicMock()
+    mock_graph.draw_mermaid.return_value = "mermaid definition"
     mock_graph.draw_mermaid_png.return_value = b"dummy bytes"
     with patch("cli.TDDAgent") as mock_agent_class:
         mock_agent_class.return_value.get_graph.return_value = mock_graph
         res = main(["--draw-graph"])
         assert res is None
 
-        graph_file = tmp_path / "workflow_graph.png"
+        mmd_file = tmp_path / "docs" / "workflow_graph.mmd"
+        assert mmd_file.exists()
+        assert mmd_file.read_text(encoding="utf-8") == "mermaid definition"
+
+        graph_file = tmp_path / "docs" / "workflow_graph.png"
         assert graph_file.exists()
         assert graph_file.read_bytes() == b"dummy bytes"
 
@@ -223,6 +228,7 @@ def test_cli_draw_graph(tmp_path, monkeypatch):
 def test_cli_draw_graph_failure(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     mock_graph = MagicMock()
+    mock_graph.draw_mermaid.return_value = "mermaid definition"
     mock_graph.draw_mermaid_png.side_effect = Exception("draw error")
     with (
         patch("cli.TDDAgent") as mock_agent_class,

@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 from langgraph.graph import END
 
-from agent import (
+from tddrobo.agent import (
     TDDAgent,
     check_initial_impl_syntax,
     check_integration_impl_syntax,
@@ -52,19 +52,27 @@ from agent import (
     should_run_unit_tests,
     update_design_for_req,
 )
-from schema import BugReport, DesignDocument, RefactorDecision, TDDState, TestCase, TestPlan, TestPlanReviewReport
+from tddrobo.schema import (
+    BugReport,
+    DesignDocument,
+    RefactorDecision,
+    TDDState,
+    TestCase,
+    TestPlan,
+    TestPlanReviewReport,
+)
 
 
 def test_agent_print_override(capsys):
-    from agent import print as agent_print
+    from tddrobo.agent import print as agent_print
 
     agent_print("Hello", end="", flush=True)
     captured = capsys.readouterr()
     assert captured.out == "Hello"
 
 
-@patch("agent.requests.get")
-@patch("agent.save_artifact")
+@patch("tddrobo.agent.requests.get")
+@patch("tddrobo.agent.save_artifact")
 def test_fetch_spec_success(mock_save_artifact, mock_get):
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -80,8 +88,8 @@ def test_fetch_spec_success(mock_save_artifact, mock_get):
     mock_save_artifact.assert_called_once_with("specification.txt", "This is a spec")
 
 
-@patch("agent.requests.get")
-@patch("agent.read_artifact")
+@patch("tddrobo.agent.requests.get")
+@patch("tddrobo.agent.read_artifact")
 def test_fetch_spec_not_modified(mock_read_artifact, mock_get):
     mock_response = MagicMock()
     mock_response.status_code = 304
@@ -93,15 +101,15 @@ def test_fetch_spec_not_modified(mock_read_artifact, mock_get):
     with (
         patch("os.path.exists", return_value=True),
         patch("os.path.getmtime", return_value=1000),
-        patch("config.VERBOSE", True),
+        patch("tddrobo.config.VERBOSE", True),
     ):
         result = fetch_spec(state)
 
     assert result["spec_content"] == "Cached spec"
 
 
-@patch("agent.requests.get")
-@patch("agent.save_artifact")
+@patch("tddrobo.agent.requests.get")
+@patch("tddrobo.agent.save_artifact")
 def test_fetch_spec_html(mock_save_artifact, mock_get):
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -114,7 +122,7 @@ def test_fetch_spec_html(mock_save_artifact, mock_get):
     assert "# Title" in result["spec_content"]
 
 
-@patch("agent.requests.get")
+@patch("tddrobo.agent.requests.get")
 def test_fetch_spec_request_exception(mock_get):
     import requests
 
@@ -130,7 +138,7 @@ def test_fetch_spec_local_text_file(tmp_path):
     spec_file.write_text("Local text spec", encoding="utf-8")
 
     state = TDDState(spec_url=str(spec_file))
-    with patch("agent.save_artifact") as mock_save_artifact:
+    with patch("tddrobo.agent.save_artifact") as mock_save_artifact:
         result = fetch_spec(state)
         assert result["spec_content"] == "Local text spec"
         mock_save_artifact.assert_called_once_with("specification.txt", "Local text spec")
@@ -141,7 +149,7 @@ def test_fetch_spec_local_html_file(tmp_path):
     spec_file.write_text("<h1>Local HTML spec</h1>", encoding="utf-8")
 
     state = TDDState(spec_url=str(spec_file))
-    with patch("agent.save_artifact") as mock_save_artifact:
+    with patch("tddrobo.agent.save_artifact") as mock_save_artifact:
         result = fetch_spec(state)
         assert "# Local HTML spec" in result["spec_content"]
         mock_save_artifact.assert_called_once()
@@ -165,9 +173,9 @@ def test_fetch_spec_local_file_read_error(tmp_path):
 
 
 def test_save_history_snapshot(tmp_path):
-    from agent import save_history_snapshot
+    from tddrobo.agent import save_history_snapshot
 
-    with patch("config.ARTIFACTS_DIR", str(tmp_path)):
+    with patch("tddrobo.config.ARTIFACTS_DIR", str(tmp_path)):
         save_history_snapshot("test.py", "print('hello')", 3)
 
         expected_path = tmp_path / "history" / "test_iter003.py"
@@ -193,7 +201,7 @@ def test_save_history_snapshot(tmp_path):
             save_history_snapshot("test.py", "print('hello')", 3)
 
 
-@patch("agent.call_llm_standard")
+@patch("tddrobo.agent.call_llm_standard")
 def test_plan_files(mock_call_llm_standard):
     mock_call_llm_standard.return_value = '```json\n{"impl_filename": "my_impl.py", "test_filename": "my_test.py"}\n```'
     state = TDDState(goal="Make a calculator")
@@ -204,8 +212,8 @@ def test_plan_files(mock_call_llm_standard):
     assert result["test_module_name"] == "my_test.py"
 
 
-@patch("agent._call_llm_structured")
-@patch("agent.save_artifact")
+@patch("tddrobo.agent._call_llm_structured")
+@patch("tddrobo.agent.save_artifact")
 def test_generate_design_initial(mock_save_artifact, mock_llm):
     mock_doc = DesignDocument(
         module_responsibilities="responsibilities",
@@ -225,8 +233,8 @@ def test_generate_design_initial(mock_save_artifact, mock_llm):
     assert "responsibilities" in res["design_doc"]
 
 
-@patch("agent._call_llm_structured")
-@patch("agent.save_artifact")
+@patch("tddrobo.agent._call_llm_structured")
+@patch("tddrobo.agent.save_artifact")
 def test_update_design_for_req(mock_save_artifact, mock_llm):
     mock_doc = DesignDocument(
         module_responsibilities="updated",
@@ -255,8 +263,8 @@ def test_update_design_for_req(mock_save_artifact, mock_llm):
     assert res["test_plan_review_decision"] is None
 
 
-@patch("agent._call_llm_structured")
-@patch("agent.save_artifact")
+@patch("tddrobo.agent._call_llm_structured")
+@patch("tddrobo.agent.save_artifact")
 def test_update_design_for_req_with_failure_context(mock_save_artifact, mock_llm):
     mock_doc = DesignDocument(
         module_responsibilities="updated",
@@ -289,8 +297,8 @@ def test_update_design_for_req_with_failure_context(mock_save_artifact, mock_llm
     assert "CRITICAL REFRACTOR DIRECTIVE" in called_prompt
 
 
-@patch("agent.save_artifact")
-@patch("agent._call_llm_structured")
+@patch("tddrobo.agent.save_artifact")
+@patch("tddrobo.agent._call_llm_structured")
 def test_update_design_for_req_with_last_green(mock_llm, mock_save_artifact):
     mock_doc = DesignDocument(
         module_responsibilities="updated",
@@ -319,7 +327,7 @@ def test_update_design_for_req_with_last_green(mock_llm, mock_save_artifact):
     assert "def broken(): pass" not in called_prompt
 
 
-@patch("agent._call_llm_structured")
+@patch("tddrobo.agent._call_llm_structured")
 def test_plan_unit_tests(mock_llm):
     mock_plan = TestPlan(test_cases=[TestCase(action="test 1", expected_outcome="outcome 1")])
     mock_llm.return_value = mock_plan
@@ -333,7 +341,7 @@ def test_plan_unit_tests(mock_llm):
     assert "test 1" in res["test_plan"]
 
 
-@patch("agent._call_llm_structured")
+@patch("tddrobo.agent._call_llm_structured")
 def test_review_unit_test_plan(mock_llm):
     mock_review = TestPlanReviewReport(missing_test_cases=[], estimated_coverage=95, feedback="good")
     mock_llm.return_value = mock_review
@@ -347,7 +355,7 @@ def test_review_unit_test_plan(mock_llm):
     assert res["test_plan_review_decision"] == "continue"
 
 
-@patch("agent._call_llm_structured")
+@patch("tddrobo.agent._call_llm_structured")
 def test_plan_integration_tests(mock_llm):
     mock_plan = TestPlan(test_cases=[TestCase(action="test 2", expected_outcome="outcome 2")])
     mock_llm.return_value = mock_plan
@@ -360,7 +368,7 @@ def test_plan_integration_tests(mock_llm):
     assert "test 2" in res["test_plan"]
 
 
-@patch("agent._call_llm_structured")
+@patch("tddrobo.agent._call_llm_structured")
 def test_review_integration_test_plan(mock_llm):
     mock_review = TestPlanReviewReport(missing_test_cases=["missing 1"], estimated_coverage=60, feedback="bad")
     mock_llm.return_value = mock_review
@@ -374,8 +382,8 @@ def test_review_integration_test_plan(mock_llm):
     assert res["test_plan_review_decision"] == "review_test_plan"
 
 
-@patch("agent._call_llm_text")
-@patch("agent.save_artifact")
+@patch("tddrobo.agent._call_llm_text")
+@patch("tddrobo.agent.save_artifact")
 def test_generate_unit_tests(mock_save, mock_llm):
     mock_llm.return_value = "def test_unit(): pass"
     state = TDDState(
@@ -388,7 +396,7 @@ def test_generate_unit_tests(mock_save, mock_llm):
     assert "unit.py" in res["test_module_name"]
 
 
-@patch("agent._syntax_check_helper")
+@patch("tddrobo.agent._syntax_check_helper")
 def test_check_unit_tests_syntax(mock_helper):
     mock_helper.return_value = {"tests_check_output": ""}
     state = TDDState(test_module_name="test_unit.py")
@@ -396,8 +404,8 @@ def test_check_unit_tests_syntax(mock_helper):
     assert res["tests_check_output"] == ""
 
 
-@patch("agent._call_llm_text")
-@patch("agent.save_artifact")
+@patch("tddrobo.agent._call_llm_text")
+@patch("tddrobo.agent.save_artifact")
 def test_generate_integration_tests(mock_save, mock_llm):
     mock_llm.return_value = "def test_integ(): pass"
     state = TDDState(
@@ -410,7 +418,7 @@ def test_generate_integration_tests(mock_save, mock_llm):
     assert "integration.py" in res["test_module_name"]
 
 
-@patch("agent._syntax_check_helper")
+@patch("tddrobo.agent._syntax_check_helper")
 def test_check_integration_tests_syntax(mock_helper):
     mock_helper.return_value = {"tests_check_output": ""}
     state = TDDState(test_module_name="test_integration.py")
@@ -418,7 +426,7 @@ def test_check_integration_tests_syntax(mock_helper):
     assert res["tests_check_output"] == ""
 
 
-@patch("agent._implement_logic_helper")
+@patch("tddrobo.agent._implement_logic_helper")
 def test_implement_logic_wrappers(mock_helper):
     mock_helper.return_value = {"impl_code": "print(1)"}
     state = TDDState()
@@ -436,7 +444,7 @@ def test_implement_logic_wrappers(mock_helper):
     mock_helper.assert_called_with(state, "regression")
 
 
-@patch("agent._syntax_check_helper")
+@patch("tddrobo.agent._syntax_check_helper")
 def test_check_impl_syntax_wrappers(mock_helper):
     mock_helper.return_value = {"impl_check_output": ""}
     state = TDDState(module_name="impl.py")
@@ -447,7 +455,7 @@ def test_check_impl_syntax_wrappers(mock_helper):
     assert check_refactored_impl_syntax(state) == {"impl_check_output": "", "impl_updated": False}
 
 
-@patch("agent._syntax_check_helper")
+@patch("tddrobo.agent._syntax_check_helper")
 def test_check_impl_syntax_wrappers_skipping(mock_helper):
     state = TDDState(module_name="impl.py", impl_updated=False)
     expected = {"syntax_error_iterations": 0, "impl_check_output": "", "impl_updated": False}
@@ -459,7 +467,7 @@ def test_check_impl_syntax_wrappers_skipping(mock_helper):
     mock_helper.assert_not_called()
 
 
-@patch("agent._execute_tests_helper")
+@patch("tddrobo.agent._execute_tests_helper")
 def test_run_tests_wrappers(mock_helper):
     mock_helper.return_value = {"success": True, "test_output": "passed"}
     state = TDDState(test_module_name="test_unit.py")
@@ -477,7 +485,7 @@ def test_run_tests_wrappers(mock_helper):
     assert res3["regression_test_iterations"] == 1
 
 
-@patch("agent._call_llm_structured")
+@patch("tddrobo.agent._call_llm_structured")
 def test_generate_bug_reports(mock_llm):
     mock_bug = BugReport(
         failed_test_cases=["case 1"],
@@ -514,7 +522,7 @@ def test_generate_bug_reports(mock_llm):
     assert "case 1" in res4["bug_report"]
 
 
-@patch("agent._call_llm_structured")
+@patch("tddrobo.agent._call_llm_structured")
 def test_decide_refactor(mock_llm):
     mock_dec = RefactorDecision(chain_of_thought="cot", refactor_needed=True, reasons=["duplication"])
     mock_llm.return_value = mock_dec
@@ -526,15 +534,15 @@ def test_decide_refactor(mock_llm):
     assert res["last_green_impl_code"] == "def green(): pass"
 
 
-@patch("agent.save_artifact")
-@patch("agent.save_history_snapshot")
+@patch("tddrobo.agent.save_artifact")
+@patch("tddrobo.agent.save_history_snapshot")
 def test_generate_refactor_bug_report_circuit_breaker(mock_snapshot, mock_save):
     state = TDDState(
         refactor_iterations=5,
         last_green_impl_code="def green(): pass",
         module_name="bc_clone.py",
     )
-    with patch("config.MAX_REFACTOR_ITERATIONS", 5):
+    with patch("tddrobo.config.MAX_REFACTOR_ITERATIONS", 5):
         res = generate_refactor_bug_report(state)
         assert res["next_action"] == "rollback_continue"
         assert res["impl_code"] == "def green(): pass"
@@ -543,8 +551,8 @@ def test_generate_refactor_bug_report_circuit_breaker(mock_snapshot, mock_save):
         mock_snapshot.assert_called_once()
 
 
-@patch("agent._call_llm_text")
-@patch("agent.save_artifact")
+@patch("tddrobo.agent._call_llm_text")
+@patch("tddrobo.agent.save_artifact")
 def test_refactor_logic(mock_save, mock_llm):
     mock_llm.return_value = "def clean(): pass"
     state = TDDState(reasons=["duplication"])
@@ -563,8 +571,8 @@ def test_increment_requirement():
     assert res["design_updated"] is False
 
 
-@patch("agent.call_llm_standard")
-@patch("agent.save_artifact")
+@patch("tddrobo.agent.call_llm_standard")
+@patch("tddrobo.agent.save_artifact")
 def test_generate_readme(mock_save, mock_llm):
     mock_llm.return_value = "README content"
     state = TDDState(goal="goal")
@@ -663,20 +671,20 @@ def test_conditional_routing_edges():
     assert should_route_from_audit({}) == "update_design_for_req"
 
     # should_fix_unit_tests_or_impl
-    with patch("agent._detect_toggle_loop", return_value=True):
+    with patch("tddrobo.agent._detect_toggle_loop", return_value=True):
         assert should_fix_unit_tests_or_impl({"next_action": "implement_initial_logic"}) == "analyze_architecture"
-    with patch("agent._detect_toggle_loop", return_value=False):
+    with patch("tddrobo.agent._detect_toggle_loop", return_value=False):
         assert should_fix_unit_tests_or_impl({"next_action": "implement_initial_logic"}) == "implement_initial_logic"
     assert should_fix_unit_tests_or_impl({"next_action": "generate_tests"}) == "generate_unit_tests"
 
     # should_fix_integration_tests_or_impl
-    with patch("agent._detect_toggle_loop", return_value=True):
+    with patch("tddrobo.agent._detect_toggle_loop", return_value=True):
         assert (
             should_fix_integration_tests_or_impl({"next_action": "implement_integration_logic"})
             == "analyze_architecture"
         )
         assert should_fix_integration_tests_or_impl({"next_action": "implement_logic"}) == "analyze_architecture"
-    with patch("agent._detect_toggle_loop", return_value=False):
+    with patch("tddrobo.agent._detect_toggle_loop", return_value=False):
         assert (
             should_fix_integration_tests_or_impl({"next_action": "implement_integration_logic"})
             == "implement_integration_logic"
@@ -685,12 +693,12 @@ def test_conditional_routing_edges():
     assert should_fix_integration_tests_or_impl({"next_action": "generate_tests"}) == "generate_integration_tests"
 
     # should_fix_regression_tests_or_impl
-    with patch("agent._detect_toggle_loop", return_value=True):
+    with patch("tddrobo.agent._detect_toggle_loop", return_value=True):
         assert (
             should_fix_regression_tests_or_impl({"next_action": "implement_regression_logic"}) == "analyze_architecture"
         )
         assert should_fix_regression_tests_or_impl({"next_action": "implement_logic"}) == "analyze_architecture"
-    with patch("agent._detect_toggle_loop", return_value=False):
+    with patch("tddrobo.agent._detect_toggle_loop", return_value=False):
         assert (
             should_fix_regression_tests_or_impl({"next_action": "implement_regression_logic"})
             == "implement_regression_logic"
@@ -770,9 +778,8 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
     import subprocess
     from unittest.mock import MagicMock, patch
 
-    import agent
-    import config
-    from schema import OracleAssertionTarget, TDDState, TestPlan, TestPlanReviewReport
+    from tddrobo import agent, config
+    from tddrobo.schema import OracleAssertionTarget, TDDState, TestPlan, TestPlanReviewReport
 
     # 1. save_history_snapshot req_id fallback (line 113) and config.VERBOSE (line 133)
     monkeypatch.setattr(config, "ARTIFACTS_DIR", str(tmp_path))
@@ -789,23 +796,23 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
 
     # 2. _call_llm_structured fallback/data validations (lines 157-161)
     # schema has no model_validate (returns dict)
-    with patch("utils.call_llm_standard", return_value='{"key": "val"}'):
+    with patch("tddrobo.utils.call_llm_standard", return_value='{"key": "val"}'):
         res = agent._call_llm_structured("prompt", dict, model_name="secondary")
         assert res == {"key": "val"}
 
     # exception parsing LLM structured response
-    with patch("utils.call_llm_standard", return_value="invalid json"):
+    with patch("tddrobo.utils.call_llm_standard", return_value="invalid json"):
         import pytest
 
         with pytest.raises(Exception):
             agent._call_llm_structured("prompt", TestPlan, model_name="secondary")
 
     # response is not string
-    with patch("utils.call_llm_standard", return_value={"mock_key": "mock_val"}):
+    with patch("tddrobo.utils.call_llm_standard", return_value={"mock_key": "mock_val"}):
         assert agent._call_llm_structured("prompt", TestPlan, model_name="secondary") is not None
 
     # 3. _call_llm_text (line 172)
-    with patch("utils.call_llm_standard", return_value="```python\n# code\n```"):
+    with patch("tddrobo.utils.call_llm_standard", return_value="```python\n# code\n```"):
         assert agent._call_llm_text("prompt", model_name="secondary") == "# code"
 
     # 4. _execute_tests_helper maxfail, timeout, output truncation, config.VERBOSE
@@ -896,7 +903,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
         assert res["success"] is False
 
     # 5. _syntax_check_helper with syntax error (lines 254-256)
-    with patch("agent._run_syntax_check", return_value="syntax error details"):
+    with patch("tddrobo.agent._run_syntax_check", return_value="syntax error details"):
         res = agent._syntax_check_helper("app.py", "syntax_error_iterations", state_no_req_id)
         assert res["syntax_error_iterations"] == 1
         assert res["impl_check_output"] == "syntax error details"
@@ -986,7 +993,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
         integration_test_plan="{}",
         design_updated=False,
     )
-    with patch("agent._call_llm_structured", return_value=TestPlan(test_cases=[])):
+    with patch("tddrobo.agent._call_llm_structured", return_value=TestPlan(test_cases=[])):
         res_unit = agent.plan_unit_tests(state_plan_fix)
         res_integ = agent.plan_integration_tests(state_plan_fix)
         assert "unit_test_plan" in res_unit
@@ -1001,7 +1008,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
         integration_test_plan="invalid json",
         design_updated=False,
     )
-    with patch("agent._call_llm_structured", return_value=TestPlan(test_cases=[])):
+    with patch("tddrobo.agent._call_llm_structured", return_value=TestPlan(test_cases=[])):
         agent.plan_unit_tests(state_plan_fix_exception)
         agent.plan_integration_tests(state_plan_fix_exception)
 
@@ -1014,7 +1021,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
         design_updated=False,
     )
     with patch(
-        "agent._call_llm_structured",
+        "tddrobo.agent._call_llm_structured",
         return_value=TestPlan(
             test_cases=[
                 TestCase(action="Existing Case", expected_outcome="Outcome"),
@@ -1042,7 +1049,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
         captured_prompts.append(prompt)
         return TestPlan(test_cases=[])
 
-    with patch("agent._call_llm_structured", side_effect=mock_call_llm):
+    with patch("tddrobo.agent._call_llm_structured", side_effect=mock_call_llm):
         agent.plan_unit_tests(state_plan_design_updated)
         agent.plan_integration_tests(state_plan_design_updated)
 
@@ -1059,7 +1066,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
         target_test_plan_coverage=95,
     )
     with patch(
-        "agent._call_llm_structured",
+        "tddrobo.agent._call_llm_structured",
         return_value=TestPlanReviewReport(missing_test_cases=[], estimated_coverage=50, feedback="poor"),
     ):
         res_review_unit = agent.review_unit_test_plan(state_review_loop)
@@ -1077,7 +1084,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
         target_test_plan_coverage=95,
     )
     with patch(
-        "agent._call_llm_structured",
+        "tddrobo.agent._call_llm_structured",
         return_value=TestPlanReviewReport(missing_test_cases=[], estimated_coverage=50, feedback="poor"),
     ):
         res_review_unit = agent.review_unit_test_plan(state_review_loop_low)
@@ -1102,7 +1109,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
 
     with (
         patch("subprocess.run", return_value=MagicMock(returncode=1)),
-        patch("agent.call_llm_with_reasoning", return_value="```python\ndef add(a,b): return a+b\n```"),
+        patch("tddrobo.agent.call_llm_with_reasoning", return_value="```python\ndef add(a,b): return a+b\n```"),
     ):
         res = agent._implement_logic_helper(state_sr_mult, "unit")
         assert res is not None
@@ -1123,7 +1130,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
     )
     with (
         patch("subprocess.run", return_value=MagicMock(returncode=1)),
-        patch("agent.call_llm_with_reasoning", return_value="```python\ndef add(a,b): return a+b\n```"),
+        patch("tddrobo.agent.call_llm_with_reasoning", return_value="```python\ndef add(a,b): return a+b\n```"),
     ):
         res_sr_fb = agent._implement_logic_helper(state_sr_failed_block, "unit")
         assert res_sr_fb is not None
@@ -1242,7 +1249,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
 
         return OracleAssertionTarget(expression=expr, expected=expected, preceding=preceding)
 
-    with patch("agent._call_llm_structured", side_effect=mock_extract_oracle_target):
+    with patch("tddrobo.agent._call_llm_structured", side_effect=mock_extract_oracle_target):
         # verifier is None
         monkeypatch.setattr(config, "ORACLE_VERIFIER", None)
         assert agent._run_oracle_verification_on_failures("output", "code") == ""
@@ -1269,7 +1276,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
 
     # 15. Coverage for line 161 (res not string in _call_llm_structured)
     # We need this to return a dict for coverage of fallback, so we patch it temporarily here
-    with patch("utils.call_llm_standard", return_value={"some_dict": 1}):
+    with patch("tddrobo.utils.call_llm_standard", return_value={"some_dict": 1}):
         res_dict = agent._call_llm_structured("prompt", TestPlan, model_name="secondary")
         assert res_dict == {"some_dict": 1}
 
@@ -1277,7 +1284,8 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
     # 17. Coverage for line 356 (generate_requirements verbose print)
     state_reqs = TDDState(spec_content="Some spec", spec_url="http://example.com/spec")
     with patch(
-        "agent.call_llm_standard", return_value='{"requirements": [{"id": "REQ001", "description": "req desc"}]}'
+        "tddrobo.agent.call_llm_standard",
+        return_value='{"requirements": [{"id": "REQ001", "description": "req desc"}]}',
     ):
         monkeypatch.setattr(config, "VERBOSE", True)
         res_reqs = agent.generate_requirements(state_reqs)
@@ -1296,7 +1304,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(config, "ARTIFACTS_DIR", str(tmp_path))
     with patch("subprocess.run", side_effect=RuntimeError("Pytest execution failed")):
-        with patch("agent.call_llm_with_reasoning", return_value="```python\n# dummy code\n```"):
+        with patch("tddrobo.agent.call_llm_with_reasoning", return_value="```python\n# dummy code\n```"):
             res = agent._implement_logic_helper(state_skip_exc, "unit")
             assert res is not None
 
@@ -1308,7 +1316,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
         current_req_index=5,
         bug_report="some bug",
     )
-    with patch("agent.call_llm_with_reasoning", return_value="```python\n# dummy code\n```"):
+    with patch("tddrobo.agent.call_llm_with_reasoning", return_value="```python\n# dummy code\n```"):
         res = agent._implement_logic_helper(state_no_active_req, "unit")
         assert res is not None
 
@@ -1331,7 +1339,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
         design_updated=True,
         bug_report="some bug",
     )
-    with patch("agent.call_llm_with_reasoning", return_value="```python\n# dummy code\n```"):
+    with patch("tddrobo.agent.call_llm_with_reasoning", return_value="```python\n# dummy code\n```"):
         res_integ = agent._implement_logic_helper(state_integ, "integration")
         assert res_integ is not None
 
@@ -1363,7 +1371,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
         bug_report="some bug",
     )
     (tmp_path / "app.py").write_text("X\nX\nX\nA\nX\nX\nX")
-    with patch("agent.call_llm_with_reasoning", return_value="```python\n# dummy\n```"):
+    with patch("tddrobo.agent.call_llm_with_reasoning", return_value="```python\n# dummy\n```"):
         res_sr = agent._implement_logic_helper(state_sr_mult_detailed, "unit")
         assert res_sr is not None
 
@@ -1376,7 +1384,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
         loop_detected=True,
         bug_report="some bug",
     )
-    with patch("agent.call_llm_with_reasoning", return_value="```python\n# dummy code\n```"):
+    with patch("tddrobo.agent.call_llm_with_reasoning", return_value="```python\n# dummy code\n```"):
         res_loop_w = agent._implement_logic_helper(state_loop_warning, "unit")
         assert res_loop_w is not None
 
@@ -1392,14 +1400,14 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
     (tmp_path / "app.py").write_text("def add(a, b): return a + b\n")
     (tmp_path / "test_app.py").write_text("def test_app(): pass")
     bad_sr_response = "<<<<<<< SEARCH\ndef add(a, b): return a + b\n=======\ndef add(a, b): return a +\n>>>>>>> REPLACE"
-    with patch("agent.call_llm_with_reasoning", return_value=bad_sr_response):
+    with patch("tddrobo.agent.call_llm_with_reasoning", return_value=bad_sr_response):
         res = agent._implement_logic_helper(state_syntax_err, "unit")
         assert "SyntaxError" in res["impl_check_output"]
         assert res["impl_code"] == "def add(a, b): return a + b"
 
     # 24. Coverage for lines 1232, 1241, 1253-1254, 1256, 1261, 1274, 1314-1315,
     # 1327-1333, 1340, 1346-1348 (_run_oracle_verification_on_failures paths)
-    with patch("agent._call_llm_structured", side_effect=mock_extract_oracle_target):
+    with patch("tddrobo.agent._call_llm_structured", side_effect=mock_extract_oracle_target):
         monkeypatch.setattr(config, "ORACLE_VERIFIER", lambda expr: "3")
 
         # Empty failed method name
@@ -1632,7 +1640,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
         test_module_name="test_app_req001_unit.py",
         module_name="app.py",
     )
-    with patch("agent._call_llm_text", return_value="def test_new(): pass") as mock_call_llm:
+    with patch("tddrobo.agent._call_llm_text", return_value="def test_new(): pass") as mock_call_llm:
         res_unit_bug = agent.generate_unit_tests(state_unit_bug)
         assert res_unit_bug["unit_tests_code"] == "def test_new(): pass"
         called_prompt = mock_call_llm.call_args[0][0]
@@ -1648,7 +1656,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
         test_module_name="test_app_req001_integration.py",
         module_name="app.py",
     )
-    with patch("agent._call_llm_text", return_value="def test_new(): pass") as mock_call_llm:
+    with patch("tddrobo.agent._call_llm_text", return_value="def test_new(): pass") as mock_call_llm:
         res_integ_bug = agent.generate_integration_tests(state_integ_bug)
         assert res_integ_bug["integration_tests_code"] == "def test_new(): pass"
         called_prompt = mock_call_llm.call_args[0][0]
@@ -1660,7 +1668,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
         reasons=["cleanup"],
         bug_report="Some refactor bug",
     )
-    with patch("agent._call_llm_text", return_value="def clean(): pass") as mock_call_llm:
+    with patch("tddrobo.agent._call_llm_text", return_value="def clean(): pass") as mock_call_llm:
         res_refactor_bug = agent.refactor_logic(state_refactor_bug)
         assert res_refactor_bug["impl_code"] == "def clean(): pass"
         called_prompt = mock_call_llm.call_args[0][0]
@@ -1689,7 +1697,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
         return real_open(file, mode, *args, **kwargs)
 
     with patch("builtins.open", side_effect=mock_open_impl):
-        with patch("agent._call_llm_text", return_value="def test_new(): pass"):
+        with patch("tddrobo.agent._call_llm_text", return_value="def test_new(): pass"):
             res_unit = agent.generate_unit_tests(state_unit_err)
             assert res_unit is not None
             res_integ = agent.generate_integration_tests(state_integ_err)
@@ -1697,7 +1705,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
 
 
 def test_get_regression_test_code_context():
-    import agent
+    from tddrobo import agent
 
     # We mock glob.glob and builtins.open
     test_files = [
@@ -1726,8 +1734,8 @@ def test_get_regression_test_code_context():
 def test_refactor_logic_bug_fix_search_replace():
     from unittest.mock import mock_open, patch
 
-    import agent
-    from schema import TDDState
+    from tddrobo import agent
+    from tddrobo.schema import TDDState
 
     # Case 1: is_bug_fix = True (bug_report + impl_code exist),
     # Search/Replace block successfully applied
@@ -1742,9 +1750,9 @@ def test_refactor_logic_bug_fix_search_replace():
         "<<<<<<< SEARCH\ndef old_func():\n    return 42\n=======\ndef old_func():\n    return 43\n>>>>>>> REPLACE"
     )
 
-    with patch("agent._call_llm_text", return_value=llm_response) as m_llm:
-        with patch("agent.save_artifact", return_value="artifacts/app.py"):
-            with patch("agent.save_history_snapshot"):
+    with patch("tddrobo.agent._call_llm_text", return_value=llm_response) as m_llm:
+        with patch("tddrobo.agent.save_artifact", return_value="artifacts/app.py"):
+            with patch("tddrobo.agent.save_history_snapshot"):
                 res = agent.refactor_logic(state_bug_fix)
                 assert res["impl_code"] == "def old_func():\n    return 43\n"
                 m_llm.assert_called_once()
@@ -1764,9 +1772,9 @@ def test_refactor_logic_bug_fix_search_replace():
     with (
         patch("os.path.exists", return_value=True),
         patch("builtins.open", mock_open(read_data=mock_file_data)) as m_file,
-        patch("agent._call_llm_text", return_value=llm_sr_response),
-        patch("agent.save_artifact", return_value="artifacts/app.py"),
-        patch("agent.save_history_snapshot"),
+        patch("tddrobo.agent._call_llm_text", return_value=llm_sr_response),
+        patch("tddrobo.agent.save_artifact", return_value="artifacts/app.py"),
+        patch("tddrobo.agent.save_history_snapshot"),
     ):
         res = agent.refactor_logic(state_file_load)
         assert res["impl_code"] == "def file_func():\n    return 1\n"
@@ -1776,9 +1784,9 @@ def test_refactor_logic_bug_fix_search_replace():
     with (
         patch("os.path.exists", return_value=True),
         patch("builtins.open", side_effect=IOError("read error")),
-        patch("agent._call_llm_text", return_value="def fallback(): pass"),
-        patch("agent.save_artifact", return_value="artifacts/app.py"),
-        patch("agent.save_history_snapshot"),
+        patch("tddrobo.agent._call_llm_text", return_value="def fallback(): pass"),
+        patch("tddrobo.agent.save_artifact", return_value="artifacts/app.py"),
+        patch("tddrobo.agent.save_history_snapshot"),
     ):
         res = agent.refactor_logic(state_file_load)
         assert res["impl_code"] == "def fallback(): pass"
@@ -1798,9 +1806,9 @@ def test_refactor_logic_bug_fix_search_replace():
     # S/R fails, so it falls back to full code generation (calling LLM again)
     side_effects = [llm_response_fail, "def fallback_func():\n    pass"]
     with (
-        patch("agent._call_llm_text", side_effect=side_effects),
-        patch("agent.save_artifact", return_value="artifacts/app.py"),
-        patch("agent.save_history_snapshot"),
+        patch("tddrobo.agent._call_llm_text", side_effect=side_effects),
+        patch("tddrobo.agent.save_artifact", return_value="artifacts/app.py"),
+        patch("tddrobo.agent.save_history_snapshot"),
     ):
         res = agent.refactor_logic(state_fail)
         assert res["impl_code"] == "def fallback_func():\n    pass"
@@ -1814,9 +1822,9 @@ def test_refactor_logic_bug_fix_search_replace():
     # S/R fails, so it falls back to full code generation (calling LLM again)
     syntax_side_effects = [llm_response_syntax, "def syntax_fallback():\n    pass"]
     with (
-        patch("agent._call_llm_text", side_effect=syntax_side_effects),
-        patch("agent.save_artifact", return_value="artifacts/app.py"),
-        patch("agent.save_history_snapshot"),
+        patch("tddrobo.agent._call_llm_text", side_effect=syntax_side_effects),
+        patch("tddrobo.agent.save_artifact", return_value="artifacts/app.py"),
+        patch("tddrobo.agent.save_history_snapshot"),
     ):
         res = agent.refactor_logic(state_fail)
         assert res["impl_code"] == "def syntax_fallback():\n    pass"
@@ -1825,9 +1833,9 @@ def test_refactor_logic_bug_fix_search_replace():
     # Case 5: is_bug_fix = True, but LLM returned full code block (fallback)
     llm_response_full = "```python\ndef new_func():\n    return 100\n```"
     with (
-        patch("agent._call_llm_text", return_value=llm_response_full),
-        patch("agent.save_artifact", return_value="artifacts/app.py"),
-        patch("agent.save_history_snapshot"),
+        patch("tddrobo.agent._call_llm_text", return_value=llm_response_full),
+        patch("tddrobo.agent.save_artifact", return_value="artifacts/app.py"),
+        patch("tddrobo.agent.save_history_snapshot"),
     ):
         res = agent.refactor_logic(state_fail)
         assert res["impl_code"] == "def new_func():\n    return 100"
@@ -1836,8 +1844,8 @@ def test_refactor_logic_bug_fix_search_replace():
 def test_stagnant_iterations_increment_and_reset():
     from unittest.mock import MagicMock, patch
 
-    import agent
-    from schema import TDDState
+    from tddrobo import agent
+    from tddrobo.schema import TDDState
 
     state = TDDState(
         last_test_summary="",
@@ -1889,8 +1897,8 @@ def test_detect_toggle_loop_stagnant_limit(tmp_path):
     import os
     from unittest.mock import patch
 
-    import agent
-    from schema import TDDState
+    from tddrobo import agent
+    from tddrobo.schema import TDDState
 
     # Test stagnant limit
     state_stagnant = TDDState(
@@ -1906,7 +1914,7 @@ def test_detect_toggle_loop_stagnant_limit(tmp_path):
         iterations=2,
         stagnant_iterations=2,
     )
-    with patch("config.MAX_STAGNANT_ITERATIONS", 2):
+    with patch("tddrobo.config.MAX_STAGNANT_ITERATIONS", 2):
         assert agent._detect_toggle_loop(state_stagnant_custom) is True
 
     # Test LOOP_DETECTION_THRESHOLD override
@@ -1914,12 +1922,12 @@ def test_detect_toggle_loop_stagnant_limit(tmp_path):
         iterations=5,
         stagnant_iterations=0,
     )
-    with patch("config.LOOP_DETECTION_THRESHOLD", 5):
+    with patch("tddrobo.config.LOOP_DETECTION_THRESHOLD", 5):
         assert agent._detect_toggle_loop(state_iter) is True
         assert state_iter["loop_detected"] is True
 
     # Test coverage for latest_test_mtime logic (Lines 2105 and 2128)
-    with patch("config.ARTIFACTS_DIR", str(tmp_path)):
+    with patch("tddrobo.config.ARTIFACTS_DIR", str(tmp_path)):
         history_dir = tmp_path / "history"
         history_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1953,8 +1961,8 @@ def test_detect_toggle_loop_stagnant_limit(tmp_path):
 def test_generate_refactor_bug_report_stagnant_limit():
     from unittest.mock import patch
 
-    import agent
-    from schema import TDDState
+    from tddrobo import agent
+    from tddrobo.schema import TDDState
 
     state = TDDState(
         refactor_iterations=1,
@@ -1962,8 +1970,8 @@ def test_generate_refactor_bug_report_stagnant_limit():
         last_green_impl_code="def green(): pass",
         module_name="app.py",
     )
-    with patch("agent.save_artifact") as mock_save:
-        with patch("agent.save_history_snapshot"):
+    with patch("tddrobo.agent.save_artifact") as mock_save:
+        with patch("tddrobo.agent.save_history_snapshot"):
             res = agent.generate_refactor_bug_report(state)
             assert res["next_action"] == "rollback_continue"
             assert res["impl_code"] == "def green(): pass"
@@ -1974,8 +1982,8 @@ def test_generate_refactor_bug_report_stagnant_limit():
 def test_syntax_error_overrides():
     from unittest.mock import patch
 
-    import agent
-    from schema import TDDState
+    from tddrobo import agent
+    from tddrobo.schema import TDDState
 
     # Test should_review_unit_tests_or_continue with custom MAX_SYNTAX_ERROR_ITERATIONS
     state = TDDState(
@@ -1986,7 +1994,7 @@ def test_syntax_error_overrides():
     assert agent.should_review_unit_tests_or_continue(state) == "generate_unit_tests"
 
     # With override to 2, it should force transition to generate_unit_bug_report
-    with patch("config.MAX_SYNTAX_ERROR_ITERATIONS", 2):
+    with patch("tddrobo.config.MAX_SYNTAX_ERROR_ITERATIONS", 2):
         assert agent.should_review_unit_tests_or_continue(state) == "generate_unit_bug_report"
 
     # Test should_run_unit_tests override
@@ -1995,15 +2003,15 @@ def test_syntax_error_overrides():
         syntax_error_iterations=2,
     )
     assert agent.should_run_unit_tests(state_impl) == "implement_initial_logic"
-    with patch("config.MAX_SYNTAX_ERROR_ITERATIONS", 2):
+    with patch("tddrobo.config.MAX_SYNTAX_ERROR_ITERATIONS", 2):
         assert agent.should_run_unit_tests(state_impl) == "update_design_for_req"
 
 
 def test_iterations_reset_on_test_success():
     from unittest.mock import MagicMock, patch
 
-    import agent
-    from schema import TDDState
+    from tddrobo import agent
+    from tddrobo.schema import TDDState
 
     state = TDDState(
         iterations=5,
@@ -2026,8 +2034,8 @@ def test_iterations_reset_on_test_success():
 def test_hierarchical_naming_logic(tmp_path):
     from unittest.mock import patch
 
-    import agent
-    from schema import TDDState
+    from tddrobo import agent
+    from tddrobo.schema import TDDState
 
     state = TDDState(
         design_iterations=2,
@@ -2036,7 +2044,7 @@ def test_hierarchical_naming_logic(tmp_path):
         current_req_index=0,
     )
 
-    with patch("config.ARTIFACTS_DIR", str(tmp_path)):
+    with patch("tddrobo.config.ARTIFACTS_DIR", str(tmp_path)):
         # Test Case 1: Integration Test file snapshot
         agent.save_history_snapshot(
             "test_bc_clone_req001_integration.py",
@@ -2073,7 +2081,7 @@ def test_hierarchical_naming_logic(tmp_path):
 
 
 def test_get_balanced_test_output_context():
-    from agent import _get_balanced_test_output_context, _truncate_test_output_smart
+    from tddrobo.agent import _get_balanced_test_output_context, _truncate_test_output_smart
 
     # Case 1: Empty or short text (no truncation)
     assert _get_balanced_test_output_context("", 100) == ""
@@ -2112,8 +2120,7 @@ def test_get_balanced_test_output_context():
 
 
 def test_get_existing_tests_context(tmp_path, monkeypatch):
-    import agent
-    import config
+    from tddrobo import agent, config
 
     monkeypatch.setattr(config, "ARTIFACTS_DIR", str(tmp_path))
 
@@ -2138,9 +2145,8 @@ def test_get_existing_tests_context(tmp_path, monkeypatch):
 def test_run_oracle_verification_on_failures_popen_fallback(monkeypatch):
     from unittest.mock import MagicMock, patch
 
-    import agent
-    import config
-    from schema import OracleAssertionTarget
+    from tddrobo import agent, config
+    from tddrobo.schema import OracleAssertionTarget
 
     mock_verifier = MagicMock(return_value="different_val")
     monkeypatch.setattr(config, "ORACLE_VERIFIER", mock_verifier)
@@ -2156,7 +2162,7 @@ def test_popen_case():
     def mock_extract_oracle_target(prompt, schema, model_name=None):
         return OracleAssertionTarget(expression="3 * 4", expected="correct_val", preceding=[])
 
-    with patch("agent._call_llm_structured", side_effect=mock_extract_oracle_target):
+    with patch("tddrobo.agent._call_llm_structured", side_effect=mock_extract_oracle_target):
         res = agent._run_oracle_verification_on_failures(test_output, tests_code)
     assert "mathematically INCORRECT" in res
     mock_verifier.assert_called_once_with("3 * 4", expected="correct_val")
@@ -2165,9 +2171,8 @@ def test_popen_case():
 def test_run_oracle_verification_on_failures_popen_direct_assert(monkeypatch):
     from unittest.mock import MagicMock, patch
 
-    import agent
-    import config
-    from schema import OracleAssertionTarget
+    from tddrobo import agent, config
+    from tddrobo.schema import OracleAssertionTarget
 
     mock_verifier = MagicMock(return_value="different_val")
     monkeypatch.setattr(config, "ORACLE_VERIFIER", mock_verifier)
@@ -2184,7 +2189,7 @@ def test_popen_direct():
     def mock_extract_oracle_target(prompt, schema, model_name=None):
         return OracleAssertionTarget(expression="3 * 4", expected="correct_val", preceding=[])
 
-    with patch("agent._call_llm_structured", side_effect=mock_extract_oracle_target):
+    with patch("tddrobo.agent._call_llm_structured", side_effect=mock_extract_oracle_target):
         res = agent._run_oracle_verification_on_failures(test_output, tests_code)
     assert "mathematically INCORRECT" in res
     mock_verifier.assert_called_once_with("3 * 4", expected="correct_val")
@@ -2193,8 +2198,8 @@ def test_popen_direct():
 def test_generate_unit_bug_report_oracle_override(monkeypatch):
     from unittest.mock import MagicMock
 
-    import agent
-    from schema import BugReport, TDDState
+    from tddrobo import agent
+    from tddrobo.schema import BugReport, TDDState
 
     mock_run_oracle = MagicMock(return_value="ORACLE VERIFICATION FEEDBACK: discrepancy")
     monkeypatch.setattr(agent, "_run_oracle_verification_on_failures", mock_run_oracle)
@@ -2222,8 +2227,8 @@ def test_generate_unit_bug_report_oracle_override(monkeypatch):
 def test_generate_integration_bug_report_oracle_override(monkeypatch):
     from unittest.mock import MagicMock
 
-    import agent
-    from schema import BugReport, TDDState
+    from tddrobo import agent
+    from tddrobo.schema import BugReport, TDDState
 
     mock_run_oracle = MagicMock(return_value="ORACLE VERIFICATION FEEDBACK: discrepancy")
     monkeypatch.setattr(agent, "_run_oracle_verification_on_failures", mock_run_oracle)
@@ -2251,8 +2256,8 @@ def test_generate_integration_bug_report_oracle_override(monkeypatch):
 def test_generate_regression_bug_report_oracle_override(monkeypatch):
     from unittest.mock import MagicMock
 
-    import agent
-    from schema import BugReport, TDDState
+    from tddrobo import agent
+    from tddrobo.schema import BugReport, TDDState
 
     mock_run_oracle = MagicMock(return_value="ORACLE VERIFICATION FEEDBACK: discrepancy")
     monkeypatch.setattr(agent, "_run_oracle_verification_on_failures", mock_run_oracle)
@@ -2279,8 +2284,8 @@ def test_generate_regression_bug_report_oracle_override(monkeypatch):
 def test_backup_project_before_rollback_exception(monkeypatch):
     import os
 
-    import agent
-    from schema import TDDState
+    from tddrobo import agent
+    from tddrobo.schema import TDDState
 
     def mock_makedirs(path, exist_ok=False):
         raise OSError("Permission denied")
@@ -2295,8 +2300,8 @@ def test_backup_project_before_rollback_exception(monkeypatch):
 def test_generate_regression_bug_report_triage_preserve_implement_logic(monkeypatch):
     from unittest.mock import MagicMock
 
-    import agent
-    from schema import BugReport, TDDState
+    from tddrobo import agent
+    from tddrobo.schema import BugReport, TDDState
 
     mock_run_oracle = MagicMock(return_value="ORACLE VERIFICATION FEEDBACK: discrepancy")
     monkeypatch.setattr(agent, "_run_oracle_verification_on_failures", mock_run_oracle)
@@ -2323,8 +2328,8 @@ def test_generate_regression_bug_report_triage_preserve_implement_logic(monkeypa
 def test_generate_regression_bug_report_triage_override_to_generate_tests(monkeypatch):
     from unittest.mock import MagicMock
 
-    import agent
-    from schema import BugReport, TDDState
+    from tddrobo import agent
+    from tddrobo.schema import BugReport, TDDState
 
     mock_run_oracle = MagicMock(return_value="ORACLE VERIFICATION FEEDBACK: discrepancy")
     monkeypatch.setattr(agent, "_run_oracle_verification_on_failures", mock_run_oracle)
@@ -2356,8 +2361,8 @@ def test_generate_regression_bug_report_triage_override_to_generate_tests(monkey
 def test_generate_regression_bug_report_triage_pinpoint_rollback(monkeypatch):
     from unittest.mock import MagicMock
 
-    import agent
-    from schema import BugReport, TDDState
+    from tddrobo import agent
+    from tddrobo.schema import BugReport, TDDState
 
     mock_bug_report = BugReport(
         failed_test_cases=["test_py_bc_req001_unit.py::test_a", "test_py_bc_req004_unit.py::test_b"],
@@ -2393,7 +2398,7 @@ def test_generate_regression_bug_report_triage_pinpoint_rollback(monkeypatch):
 
 
 def test_build_uniqueness_advice_additional_coverage():
-    from agent import _build_uniqueness_advice
+    from tddrobo.agent import _build_uniqueness_advice
 
     # 1. Test when no Search/Replace failure message is present (covers return "")
     res1 = _build_uniqueness_advice("Success output", "def dummy(): pass")
@@ -2408,7 +2413,7 @@ def test_build_uniqueness_advice_additional_coverage():
 
 
 def test_oracle_helper_functions_coverage():
-    from agent import (
+    from tddrobo.agent import (
         _extract_failing_line,
         _extract_method_body,
         _find_failed_methods,
@@ -2436,8 +2441,8 @@ def test_cleanup_history_on_rollback(tmp_path):
     import os
     from unittest.mock import patch
 
-    from agent import _cleanup_history_on_rollback
-    from schema import TDDState
+    from tddrobo.agent import _cleanup_history_on_rollback
+    from tddrobo.schema import TDDState
 
     # 1. Happy path: matching requirement files are renamed, others are not
     history_dir = tmp_path / "history"
@@ -2457,7 +2462,7 @@ def test_cleanup_history_on_rollback(tmp_path):
         loop_detected=True,
     )
 
-    with patch("config.ARTIFACTS_DIR", str(tmp_path)):
+    with patch("tddrobo.config.ARTIFACTS_DIR", str(tmp_path)):
         _cleanup_history_on_rollback(state)
 
     assert not f1.exists()
@@ -2473,7 +2478,7 @@ def test_cleanup_history_on_rollback(tmp_path):
         current_req_index=0,
         test_iterations=1,
     )
-    with patch("config.ARTIFACTS_DIR", str(non_existent_path)):
+    with patch("tddrobo.config.ARTIFACTS_DIR", str(non_existent_path)):
         _cleanup_history_on_rollback(state_no_dir)
 
     # 3. Coverage: req_id fallback where requirements list is empty
@@ -2489,7 +2494,7 @@ def test_cleanup_history_on_rollback(tmp_path):
     if os.path.exists(str(f1_recreate) + ".bak"):
         os.remove(str(f1_recreate) + ".bak")
 
-    with patch("config.ARTIFACTS_DIR", str(tmp_path)):
+    with patch("tddrobo.config.ARTIFACTS_DIR", str(tmp_path)):
         _cleanup_history_on_rollback(state_no_reqs)
     assert not f1_recreate.exists()
     assert os.path.exists(str(f1_recreate) + ".bak")
@@ -2500,14 +2505,14 @@ def test_cleanup_history_on_rollback(tmp_path):
     if os.path.exists(str(f1_recreate_2) + ".bak"):
         os.remove(str(f1_recreate_2) + ".bak")
 
-    with patch("config.ARTIFACTS_DIR", str(tmp_path)):
+    with patch("tddrobo.config.ARTIFACTS_DIR", str(tmp_path)):
         with patch("os.rename", side_effect=OSError("Permission denied")):
             _cleanup_history_on_rollback(state_no_reqs)
 
 
 def test_increment_requirement_last_green():
-    import agent
-    from schema import TDDState
+    from tddrobo import agent
+    from tddrobo.schema import TDDState
 
     state = TDDState(
         current_req_index=0,
@@ -2522,8 +2527,8 @@ def test_increment_requirement_last_green():
 def test_generate_tests_syntax_fix_context(tmp_path):
     from unittest.mock import patch
 
-    import agent
-    from schema import TDDState
+    from tddrobo import agent
+    from tddrobo.schema import TDDState
 
     state = TDDState(
         module_name="impl.py",
@@ -2534,9 +2539,9 @@ def test_generate_tests_syntax_fix_context(tmp_path):
     )
 
     with (
-        patch("agent._call_llm_text", return_value="def test_rebuilt():\n    pass") as mock_call,
-        patch("agent.save_artifact", return_value=str(tmp_path / "test_impl_req001_unit.py")),
-        patch("agent.save_history_snapshot"),
+        patch("tddrobo.agent._call_llm_text", return_value="def test_rebuilt():\n    pass") as mock_call,
+        patch("tddrobo.agent.save_artifact", return_value=str(tmp_path / "test_impl_req001_unit.py")),
+        patch("tddrobo.agent.save_history_snapshot"),
     ):
         agent.generate_unit_tests(state)
         called_prompt = mock_call.call_args[0][0]
@@ -2554,9 +2559,9 @@ def test_generate_tests_syntax_fix_context(tmp_path):
     )
 
     with (
-        patch("agent._call_llm_text", return_value="def test_rebuilt_integ():\n    pass") as mock_call_integ,
-        patch("agent.save_artifact", return_value=str(tmp_path / "test_impl_req001_integration.py")),
-        patch("agent.save_history_snapshot"),
+        patch("tddrobo.agent._call_llm_text", return_value="def test_rebuilt_integ():\n    pass") as mock_call_integ,
+        patch("tddrobo.agent.save_artifact", return_value=str(tmp_path / "test_impl_req001_integration.py")),
+        patch("tddrobo.agent.save_history_snapshot"),
     ):
         agent.generate_integration_tests(state_integ)
         called_prompt_integ = mock_call_integ.call_args[0][0]
@@ -2569,8 +2574,8 @@ def test_generate_tests_syntax_fix_context_load_file(tmp_path):
     import os
     from unittest.mock import patch
 
-    import agent
-    from schema import TDDState
+    from tddrobo import agent
+    from tddrobo.schema import TDDState
 
     # 1. Unit test path: successful read from file
     state = TDDState(
@@ -2587,10 +2592,10 @@ def test_generate_tests_syntax_fix_context_load_file(tmp_path):
         f.write("def test_loaded_from_disk_unit(): pass")
 
     with (
-        patch("config.ARTIFACTS_DIR", str(tmp_path)),
-        patch("agent._call_llm_text", return_value="def test_rebuilt():\n    pass") as mock_call,
-        patch("agent.save_artifact", return_value=str(test_file_path)),
-        patch("agent.save_history_snapshot"),
+        patch("tddrobo.config.ARTIFACTS_DIR", str(tmp_path)),
+        patch("tddrobo.agent._call_llm_text", return_value="def test_rebuilt():\n    pass") as mock_call,
+        patch("tddrobo.agent.save_artifact", return_value=str(test_file_path)),
+        patch("tddrobo.agent.save_history_snapshot"),
     ):
         agent.generate_unit_tests(state)
         called_prompt = mock_call.call_args[0][0]
@@ -2599,10 +2604,10 @@ def test_generate_tests_syntax_fix_context_load_file(tmp_path):
 
     # 2. Unit test path: OSError when reading from file
     with (
-        patch("config.ARTIFACTS_DIR", str(tmp_path)),
-        patch("agent._call_llm_text", return_value="def test_rebuilt():\n    pass") as mock_call,
-        patch("agent.save_artifact", return_value=str(test_file_path)),
-        patch("agent.save_history_snapshot"),
+        patch("tddrobo.config.ARTIFACTS_DIR", str(tmp_path)),
+        patch("tddrobo.agent._call_llm_text", return_value="def test_rebuilt():\n    pass") as mock_call,
+        patch("tddrobo.agent.save_artifact", return_value=str(test_file_path)),
+        patch("tddrobo.agent.save_history_snapshot"),
         patch("builtins.open", side_effect=OSError("Read error")),
     ):
         agent.generate_unit_tests(state)
@@ -2625,10 +2630,10 @@ def test_generate_tests_syntax_fix_context_load_file(tmp_path):
         f.write("def test_loaded_from_disk_integ(): pass")
 
     with (
-        patch("config.ARTIFACTS_DIR", str(tmp_path)),
-        patch("agent._call_llm_text", return_value="def test_rebuilt_integ():\n    pass") as mock_call_integ,
-        patch("agent.save_artifact", return_value=str(test_integ_file_path)),
-        patch("agent.save_history_snapshot"),
+        patch("tddrobo.config.ARTIFACTS_DIR", str(tmp_path)),
+        patch("tddrobo.agent._call_llm_text", return_value="def test_rebuilt_integ():\n    pass") as mock_call_integ,
+        patch("tddrobo.agent.save_artifact", return_value=str(test_integ_file_path)),
+        patch("tddrobo.agent.save_history_snapshot"),
     ):
         agent.generate_integration_tests(state_integ)
         called_prompt_integ = mock_call_integ.call_args[0][0]
@@ -2637,10 +2642,10 @@ def test_generate_tests_syntax_fix_context_load_file(tmp_path):
 
     # 4. Integration test path: OSError when reading from file
     with (
-        patch("config.ARTIFACTS_DIR", str(tmp_path)),
-        patch("agent._call_llm_text", return_value="def test_rebuilt_integ():\n    pass") as mock_call_integ,
-        patch("agent.save_artifact", return_value=str(test_integ_file_path)),
-        patch("agent.save_history_snapshot"),
+        patch("tddrobo.config.ARTIFACTS_DIR", str(tmp_path)),
+        patch("tddrobo.agent._call_llm_text", return_value="def test_rebuilt_integ():\n    pass") as mock_call_integ,
+        patch("tddrobo.agent.save_artifact", return_value=str(test_integ_file_path)),
+        patch("tddrobo.agent.save_history_snapshot"),
         patch("builtins.open", side_effect=OSError("Read error")),
     ):
         agent.generate_integration_tests(state_integ)
@@ -2653,9 +2658,8 @@ def test_agent_junitxml_coverage_additions(tmp_path, monkeypatch):
     from typing import cast
     from unittest.mock import MagicMock, patch
 
-    import agent
-    import config
-    from schema import TDDState
+    from tddrobo import agent, config
+    from tddrobo.schema import TDDState
 
     monkeypatch.setattr(config, "ARTIFACTS_DIR", str(tmp_path))
     monkeypatch.setattr(config, "VERBOSE", True)
@@ -2761,10 +2765,10 @@ def test_agent_junitxml_coverage_additions(tmp_path, monkeypatch):
     assert res_cb == "halt_regression_test_failure"
 
 
-@patch("agent._call_llm_structured")
-@patch("agent.save_artifact")
+@patch("tddrobo.agent._call_llm_structured")
+@patch("tddrobo.agent.save_artifact")
 def test_design_review_and_feedback(mock_save_artifact, mock_llm):
-    from agent import (
+    from tddrobo.agent import (
         generate_design_initial,
         review_design_incremental,
         review_design_initial,
@@ -2772,7 +2776,7 @@ def test_design_review_and_feedback(mock_save_artifact, mock_llm):
         should_review_design_initial_or_continue,
         update_design_for_req,
     )
-    from schema import DesignDocument, DesignReviewReport
+    from tddrobo.schema import DesignDocument, DesignReviewReport
 
     # 1. Test generate_design_initial and update_design_for_req with feedback
     # generate_design_initial with feedback
@@ -2860,13 +2864,13 @@ def test_design_review_and_feedback(mock_save_artifact, mock_llm):
 
 
 def test_early_oracle_verification_discrepancy(monkeypatch):
-    import config
-    from agent import (
+    from tddrobo import config
+    from tddrobo.agent import (
         review_integration_test_plan,
         review_unit_test_plan,
         should_review_test_plan_or_continue,
     )
-    from schema import OracleDiscrepancyJudgment, TestPlanReviewReport
+    from tddrobo.schema import OracleDiscrepancyJudgment, TestPlanReviewReport
 
     # Mock oracle verifier
     monkeypatch.setattr(config, "ORACLE_VERIFIER", lambda expr: "3" if "1 + 2" in expr else "4")
@@ -2898,7 +2902,7 @@ def test_early_oracle_verification_discrepancy(monkeypatch):
         is_design_error=True, reason="Mocked design error description", corrected_expected=None
     )
 
-    with patch("agent._call_llm_structured") as mock_call:
+    with patch("tddrobo.agent._call_llm_structured") as mock_call:
         mock_call.side_effect = [mock_report, mock_judgment]
         res_unit = review_unit_test_plan(state_discrepancy)
         assert res_unit["test_plan_review_decision"] == "update_design_for_req"
@@ -2915,7 +2919,7 @@ def test_early_oracle_verification_discrepancy(monkeypatch):
         test_plan="1. Action: execute 1 + 2 | Expected: 3",
     )
 
-    with patch("agent._call_llm_structured", return_value=mock_report):
+    with patch("tddrobo.agent._call_llm_structured", return_value=mock_report):
         res_integ = review_integration_test_plan(state_no_discrepancy)
         assert res_integ["test_plan_review_decision"] == "continue"
         assert "design_review_feedback" not in res_integ
@@ -2929,7 +2933,7 @@ def test_early_oracle_verification_discrepancy(monkeypatch):
         integration_test_plan='{"test_cases": [{"action": "execute 1 + 2", "expected_outcome": "4"}]}',
         test_plan="1. Action: execute 1 + 2 | Expected: 4",
     )
-    with patch("agent._call_llm_structured") as mock_call:
+    with patch("tddrobo.agent._call_llm_structured") as mock_call:
         mock_call.side_effect = [mock_report, mock_judgment]
         res_integ_disc = review_integration_test_plan(state_integ_discrepancy)
         assert res_integ_disc["test_plan_review_decision"] == "update_design_for_req"
@@ -2951,7 +2955,7 @@ def test_early_oracle_verification_discrepancy(monkeypatch):
     # Mock verifier to return 3.33 for scale=2; 10/3
     monkeypatch.setattr(config, "ORACLE_VERIFIER", lambda expr: "3.33" if "10/3" in expr else "4")
 
-    with patch("agent._call_llm_structured") as mock_call:
+    with patch("tddrobo.agent._call_llm_structured") as mock_call:
         mock_call.side_effect = [mock_report, mock_judgment]
         res_evaluate = review_unit_test_plan(state_evaluate_disc)
         assert res_evaluate["test_plan_review_decision"] == "update_design_for_req"
@@ -2971,7 +2975,7 @@ def test_early_oracle_verification_discrepancy(monkeypatch):
         test_plan="1. Action: execute '1 + 2' | Expected: 3\n2. Action: 123 | Expected: 123",
     )
     monkeypatch.setattr(config, "ORACLE_VERIFIER", lambda expr: "3" if "1 + 2" in expr else "123")
-    with patch("agent._call_llm_structured", return_value=mock_report):
+    with patch("tddrobo.agent._call_llm_structured", return_value=mock_report):
         res_qd = review_unit_test_plan(state_quotes_digit)
         assert res_qd["test_plan_review_decision"] == "continue"
 
@@ -2989,13 +2993,13 @@ def test_early_oracle_verification_discrepancy(monkeypatch):
         raise ValueError("Verifier Error")
 
     monkeypatch.setattr(config, "ORACLE_VERIFIER", raise_exc)
-    with patch("agent._call_llm_structured", return_value=mock_report):
+    with patch("tddrobo.agent._call_llm_structured", return_value=mock_report):
         res_exc = review_unit_test_plan(state_except)
         assert res_exc["test_plan_review_decision"] == "continue"
 
     # 5. Test with ORACLE_VERIFIER = None
     monkeypatch.setattr(config, "ORACLE_VERIFIER", None)
-    with patch("agent._call_llm_structured", return_value=mock_report):
+    with patch("tddrobo.agent._call_llm_structured", return_value=mock_report):
         res_none = review_unit_test_plan(state_discrepancy)
         assert res_none["test_plan_review_decision"] == "continue"
 
@@ -3009,7 +3013,7 @@ def test_early_oracle_verification_discrepancy(monkeypatch):
         unit_test_plan="{invalid json}",
         test_plan="1. Action: execute 1 + 2 | Expected: 4",
     )
-    with patch("agent._call_llm_structured", return_value=mock_report):
+    with patch("tddrobo.agent._call_llm_structured", return_value=mock_report):
         res_invalid = review_unit_test_plan(state_invalid_json)
         assert res_invalid["test_plan_review_decision"] == "continue"
 
@@ -3028,7 +3032,7 @@ def test_early_oracle_verification_discrepancy(monkeypatch):
     monkeypatch.setattr(
         config, "ORACLE_VERIFIER", lambda expr, expected=None: "Error: (standard_in) 2: Error: comparison in expression"
     )
-    with patch("agent._call_llm_structured") as mock_call:
+    with patch("tddrobo.agent._call_llm_structured") as mock_call:
         mock_call.side_effect = [mock_report, mock_judgment]
         res_rel = review_unit_test_plan(state_rel_err)
         assert res_rel["test_plan_review_decision"] == "update_design_for_req"
@@ -3047,7 +3051,7 @@ def test_early_oracle_verification_discrepancy(monkeypatch):
         test_plan="1. Action: execute 10 > 5 | Expected: SyntaxError",
     )
     monkeypatch.setattr(config, "ORACLE_VERIFIER", lambda expr, expected=None: "1")
-    with patch("agent._call_llm_structured") as mock_call:
+    with patch("tddrobo.agent._call_llm_structured") as mock_call:
         mock_call.side_effect = [mock_report, mock_judgment]
         res_err_exp = review_unit_test_plan(state_err_expected)
         assert res_err_exp["test_plan_review_decision"] == "update_design_for_req"
@@ -3068,7 +3072,7 @@ def test_early_oracle_verification_discrepancy(monkeypatch):
     monkeypatch.setattr(
         config, "ORACLE_VERIFIER", lambda expr, expected=None: "Error: (standard_in) 2: Error: comparison in expression"
     )
-    with patch("agent._call_llm_structured", return_value=mock_report):
+    with patch("tddrobo.agent._call_llm_structured", return_value=mock_report):
         res_err_val = review_unit_test_plan(state_err_valid)
         assert res_err_val["test_plan_review_decision"] == "continue"
 
@@ -3087,17 +3091,17 @@ def test_early_oracle_verification_discrepancy(monkeypatch):
     monkeypatch.setattr(
         config, "ORACLE_VERIFIER", lambda expr, expected=None: "Error: runtime error: undefined function: f"
     )
-    with patch("agent._call_llm_structured", return_value=mock_report):
+    with patch("tddrobo.agent._call_llm_structured", return_value=mock_report):
         res_runtime = review_unit_test_plan(state_runtime_err)
         assert res_runtime["test_plan_review_decision"] == "continue"
 
 
 def test_regression_failure_policy_logic():
-    from agent import (
+    from tddrobo.agent import (
         generate_regression_bug_report,
         should_fix_regression_tests_or_impl,
     )
-    from schema import BugReport
+    from tddrobo.schema import BugReport
 
     mock_bug_report_design = BugReport(
         failed_test_cases=["test_add_req1_unit"],
@@ -3130,7 +3134,7 @@ def test_regression_failure_policy_logic():
     )
 
     # 1. Rollback policy triggers rollback to index 0 when target_to_fix is generate_design
-    with patch("agent._call_llm_structured", return_value=mock_bug_report_design):
+    with patch("tddrobo.agent._call_llm_structured", return_value=mock_bug_report_design):
         res = generate_regression_bug_report(state_reg)
         assert res["current_req_index"] == 0
         assert res["next_action"] == "generate_design"
@@ -3170,7 +3174,7 @@ def test_regression_failure_policy_logic():
         assert res_halt["next_action"] == "halt_regression_test_failure"
 
     # 4. Rollback is skipped when target_to_fix is implement_logic
-    with patch("agent._call_llm_structured", return_value=mock_bug_report_impl):
+    with patch("tddrobo.agent._call_llm_structured", return_value=mock_bug_report_impl):
         res_impl = generate_regression_bug_report(state_reg)
         assert "current_req_index" not in res_impl
         assert res_impl["next_action"] == "implement_logic"
@@ -3208,8 +3212,7 @@ def test_regression_failure_policy_logic():
 def test_oracle_verification_math_safeguards(monkeypatch):
     from unittest.mock import MagicMock
 
-    import agent
-    import config
+    from tddrobo import agent, config
 
     # Stub the verifier
     mock_verifier = MagicMock(return_value="5")
@@ -3392,7 +3395,7 @@ def test_multiline_disc():
     assert agent._get_dynamic_max_tokens(None) == 8192
 
     # 7. Test _get_dynamic_max_tokens with active state scaling
-    from schema import TDDState
+    from tddrobo.schema import TDDState
 
     state_large = TDDState(
         impl_code="A" * 150000,  # 150,000 chars / 4 = 37,500 estimated tokens. Buffer is 4096.
@@ -3407,7 +3410,7 @@ def test_multiline_disc():
     assert agent._get_dynamic_max_tokens(state_huge) == 262144
 
     # 8. Test _call_llm_with_reasoning wrapper routes max_tokens correctly
-    with patch("agent.call_llm_with_reasoning") as mock_reasoning:
+    with patch("tddrobo.agent.call_llm_with_reasoning") as mock_reasoning:
         mock_reasoning.return_value = "mock response"
         # Mock thread local state
         agent._thread_local.current_state = state_large
@@ -3430,9 +3433,8 @@ def test_robust_self_correction_rollback_improvements(tmp_path, monkeypatch):
     import builtins
     from unittest.mock import patch
 
-    import agent
-    import config
-    from schema import BugReport, TDDState, TestPlan
+    from tddrobo import agent, config
+    from tddrobo.schema import BugReport, TDDState, TestPlan
 
     # Mock Artifacts Dir
     monkeypatch.setattr(config, "ARTIFACTS_DIR", str(tmp_path))
@@ -3471,7 +3473,7 @@ def test_robust_self_correction_rollback_improvements(tmp_path, monkeypatch):
         bug_report="ORACLE DISCREPANCY REPORT",
     )
     mock_test_plan = TestPlan(test_cases=[])
-    with patch("agent._call_llm_structured", return_value=mock_test_plan) as mock_llm:
+    with patch("tddrobo.agent._call_llm_structured", return_value=mock_test_plan) as mock_llm:
         agent.plan_unit_tests(state_plan)
         called_prompt_unit = mock_llm.call_args[0][0]
         assert "Previous Test Mismatch / Oracle Warnings" in called_prompt_unit
@@ -3560,14 +3562,14 @@ def test_robust_self_correction_rollback_improvements(tmp_path, monkeypatch):
     )
 
     # Test rollback path (target_to_fix is generate_design) -> restores impl and design
-    with patch("agent._call_llm_structured", return_value=mock_bug_report_design):
+    with patch("tddrobo.agent._call_llm_structured", return_value=mock_bug_report_design):
         res_report = agent.generate_regression_bug_report(state_report)
         assert res_report["next_action"] == "generate_design"
         assert res_report["current_req_index"] == 0
         assert res_report["design_doc"] == "historical design content"
 
     # Test non-rollback path (target_to_fix is implement_logic) -> skips rollback
-    with patch("agent._call_llm_structured", return_value=mock_bug_report_impl):
+    with patch("tddrobo.agent._call_llm_structured", return_value=mock_bug_report_impl):
         res_report_impl = agent.generate_regression_bug_report(state_report)
         assert "current_req_index" not in res_report_impl
         assert res_report_impl["next_action"] == "implement_logic"
@@ -3619,7 +3621,7 @@ def test_robust_self_correction_rollback_improvements(tmp_path, monkeypatch):
         regression_failure_policy="rollback",
         module_name="py_bc.py",
     )
-    with patch("agent._call_llm_structured", return_value=mock_bug_report_design):
+    with patch("tddrobo.agent._call_llm_structured", return_value=mock_bug_report_design):
         res_report_no_backup = agent.generate_regression_bug_report(state_report_no_backup)
         assert res_report_no_backup["next_action"] == "generate_design"
         assert res_report_no_backup["current_req_index"] == 1
@@ -3636,7 +3638,7 @@ def test_robust_self_correction_rollback_improvements(tmp_path, monkeypatch):
         regression_failure_policy="rollback",
         module_name="py_bc.py",
     )
-    with patch("agent._call_llm_structured", return_value=mock_bug_report_design):
+    with patch("tddrobo.agent._call_llm_structured", return_value=mock_bug_report_design):
         with patch("shutil.copy", side_effect=IOError("copy failed")):
             res_report_err = agent.generate_regression_bug_report(state_report_copy_err)
             assert res_report_err["next_action"] == "generate_design"
@@ -3646,8 +3648,8 @@ def test_robust_self_correction_rollback_improvements(tmp_path, monkeypatch):
 def test_oracle_judgment_and_rollback_paths(monkeypatch):
     from unittest.mock import patch
 
-    import agent
-    from schema import OracleDiscrepancyJudgment, TDDState, TestPlanReviewReport
+    from tddrobo import agent
+    from tddrobo.schema import OracleDiscrepancyJudgment, TDDState, TestPlanReviewReport
 
     # Mock the LLM calls
     mock_judgment_design = OracleDiscrepancyJudgment(
@@ -3660,13 +3662,13 @@ def test_oracle_judgment_and_rollback_paths(monkeypatch):
     )
 
     # 1. Test _judge_oracle_discrepancy_with_llm
-    with patch("agent._call_llm_structured", return_value=mock_judgment_design):
+    with patch("tddrobo.agent._call_llm_structured", return_value=mock_judgment_design):
         res = agent._judge_oracle_discrepancy_with_llm("design_doc", {"action": "eval"}, "16.2")
         assert res.is_design_error is True
         assert res.reason == "Core rules for multiplication are missing in design"
 
     # LLM exception path
-    with patch("agent._call_llm_structured", side_effect=ValueError("LLM error")):
+    with patch("tddrobo.agent._call_llm_structured", side_effect=ValueError("LLM error")):
         res_err = agent._judge_oracle_discrepancy_with_llm("design_doc", {"action": "eval"}, "16.2")
         assert res_err.is_design_error is True
         assert "LLM error" in res_err.reason
@@ -3700,8 +3702,8 @@ def test_oracle_judgment_and_rollback_paths(monkeypatch):
     )
 
     # Path A: Design error detected (should rollback to update_design_for_req)
-    with patch("agent._run_early_oracle_verification", return_value=mismatches):
-        with patch("agent._call_llm_structured") as mock_calls:
+    with patch("tddrobo.agent._run_early_oracle_verification", return_value=mismatches):
+        with patch("tddrobo.agent._call_llm_structured") as mock_calls:
             mock_calls.side_effect = [mock_review_report, mock_judgment_design]
 
             res_unit = agent.review_unit_test_plan(state)
@@ -3709,8 +3711,8 @@ def test_oracle_judgment_and_rollback_paths(monkeypatch):
             assert res_unit["oracle_discrepancy_only"] is False
 
     # Path B: Test Plan notation error detected (should rollback to review_test_plan)
-    with patch("agent._run_early_oracle_verification", return_value=mismatches):
-        with patch("agent._call_llm_structured") as mock_calls:
+    with patch("tddrobo.agent._run_early_oracle_verification", return_value=mismatches):
+        with patch("tddrobo.agent._call_llm_structured") as mock_calls:
             mock_calls.side_effect = [mock_review_report, mock_judgment_test_plan]
 
             res_unit = agent.review_unit_test_plan(state)
@@ -3718,15 +3720,15 @@ def test_oracle_judgment_and_rollback_paths(monkeypatch):
             assert res_unit["oracle_discrepancy_only"] is True
 
     # Path C: Integration Test Plan verification matching tests
-    with patch("agent._run_early_oracle_verification", return_value=mismatches):
-        with patch("agent._call_llm_structured") as mock_calls:
+    with patch("tddrobo.agent._run_early_oracle_verification", return_value=mismatches):
+        with patch("tddrobo.agent._call_llm_structured") as mock_calls:
             mock_calls.side_effect = [mock_review_report, mock_judgment_design]
             res_integ = agent.review_integration_test_plan(state)
             assert res_integ["test_plan_review_decision"] == "update_design_for_req"
             assert res_integ["oracle_discrepancy_only"] is False
 
-    with patch("agent._run_early_oracle_verification", return_value=mismatches):
-        with patch("agent._call_llm_structured") as mock_calls:
+    with patch("tddrobo.agent._run_early_oracle_verification", return_value=mismatches):
+        with patch("tddrobo.agent._call_llm_structured") as mock_calls:
             mock_calls.side_effect = [mock_review_report, mock_judgment_test_plan]
             res_integ = agent.review_integration_test_plan(state)
             assert res_integ["test_plan_review_decision"] == "review_test_plan"
@@ -3741,7 +3743,7 @@ def test_oracle_judgment_and_rollback_paths(monkeypatch):
     assert agent._run_early_oracle_verification(plan_no_num) == []
 
     # 3c. Verifier raising exception
-    import config
+    from tddrobo import config
 
     monkeypatch.setattr(config, "ORACLE_VERIFIER", lambda expr: 1 / 0)
     plan_exc = (
@@ -3751,7 +3753,7 @@ def test_oracle_judgment_and_rollback_paths(monkeypatch):
     assert agent._run_early_oracle_verification(plan_exc) == []
 
     # 3d. Coverage for oracle_discrepancy_only path in plan_unit_tests / plan_integration_tests
-    from schema import TestCase, TestPlan
+    from tddrobo.schema import TestCase, TestPlan
 
     mock_test_plan = TestPlan(test_cases=[TestCase(action="5 != 5", expected_outcome="0")])
 
@@ -3768,7 +3770,7 @@ def test_oracle_judgment_and_rollback_paths(monkeypatch):
         oracle_discrepancy_only=True,
     )
 
-    with patch("agent._call_llm_structured", return_value=mock_test_plan):
+    with patch("tddrobo.agent._call_llm_structured", return_value=mock_test_plan):
         res_unit = agent.plan_unit_tests(state_disc_fix)
         assert "5 != 5" in res_unit["test_plan"]
 
@@ -3777,9 +3779,9 @@ def test_oracle_judgment_and_rollback_paths(monkeypatch):
 
 
 def test_test_plan_review_circuit_breakers(monkeypatch):
-    import config
-    from agent import review_integration_test_plan, review_unit_test_plan
-    from schema import OracleDiscrepancyJudgment, TestPlanReviewReport
+    from tddrobo import config
+    from tddrobo.agent import review_integration_test_plan, review_unit_test_plan
+    from tddrobo.schema import OracleDiscrepancyJudgment, TestPlanReviewReport
 
     # Mock oracle verifier
     monkeypatch.setattr(config, "ORACLE_VERIFIER", lambda expr: "0")
@@ -3803,7 +3805,7 @@ def test_test_plan_review_circuit_breakers(monkeypatch):
     mock_report = TestPlanReviewReport(missing_test_cases=[], estimated_coverage=100, feedback="looks good")
     mock_judgment = OracleDiscrepancyJudgment(is_design_error=True, reason="Flaw", corrected_expected=None)
 
-    with patch("agent._call_llm_structured") as mock_call:
+    with patch("tddrobo.agent._call_llm_structured") as mock_call:
         mock_call.side_effect = [mock_report, mock_judgment, mock_report, mock_judgment]
 
         # Test unit test plan review circuit breaker (should return review_test_plan decision)
@@ -3820,7 +3822,7 @@ def test_test_plan_review_circuit_breakers(monkeypatch):
 def test_oracle_expected_validation_relaxed():
     import pytest
 
-    from schema import TestCase
+    from tddrobo.schema import TestCase
 
     # 1. Valid raw values (numbers, decimals, raw strings)
     p1 = TestCase(action="calc", expected_outcome="5", oracle_expression="2+3", oracle_expected="5")
@@ -3871,9 +3873,8 @@ def test_oracle_expected_validation_relaxed():
 def test_run_oracle_verification_tail_matching(monkeypatch):
     from unittest.mock import MagicMock, patch
 
-    import agent
-    import config
-    from schema import OracleAssertionTarget
+    from tddrobo import agent, config
+    from tddrobo.schema import OracleAssertionTarget
 
     # Mock verifier to return a multi-line response (e.g. preceding outputs)
     mock_verifier = MagicMock(return_value="15\n2500")
@@ -3893,7 +3894,7 @@ def test_run_oracle_verification_tail_matching(monkeypatch):
     def mock_extract_match(prompt, schema, model_name=None):
         return OracleAssertionTarget(expression="1000 + 1500", expected="2500", preceding=["10 + 5"])
 
-    with patch("agent._call_llm_structured", side_effect=mock_extract_match):
+    with patch("tddrobo.agent._call_llm_structured", side_effect=mock_extract_match):
         feedback = agent._run_oracle_verification_on_failures(test_output_sim, tests_code_sim)
         # Should match, hence no mathematically INCORRECT feedback generated
         assert "mathematically INCORRECT" not in feedback
@@ -3903,7 +3904,7 @@ def test_run_oracle_verification_tail_matching(monkeypatch):
     def mock_extract_mismatch(prompt, schema, model_name=None):
         return OracleAssertionTarget(expression="1000 + 1500", expected="2501", preceding=["10 + 5"])
 
-    with patch("agent._call_llm_structured", side_effect=mock_extract_mismatch):
+    with patch("tddrobo.agent._call_llm_structured", side_effect=mock_extract_mismatch):
         feedback_mismatch = agent._run_oracle_verification_on_failures(test_output_sim, tests_code_sim)
         # Should not match, hence mathematical discrepancy feedback is generated
         assert "ORACLE VERIFICATION" in feedback_mismatch
@@ -3913,9 +3914,8 @@ def test_run_oracle_verification_tail_matching(monkeypatch):
 def test_robust_self_correction_new_features(tmp_path, monkeypatch):
     from unittest.mock import patch
 
-    import agent
-    import config
-    from schema import BugReport, TDDState
+    from tddrobo import agent, config
+    from tddrobo.schema import BugReport, TDDState
 
     # 1. Setup mock artifacts directory
     monkeypatch.setattr(config, "ARTIFACTS_DIR", str(tmp_path))
@@ -3964,8 +3964,8 @@ def test_robust_self_correction_new_features(tmp_path, monkeypatch):
         failed_test_cases=[], expected_vs_actual="", fix_instructions="", target_to_fix="generate_tests"
     )
     with (
-        patch("agent._call_llm_structured", return_value=mock_bug_report),
-        patch("agent.save_history_snapshot"),
+        patch("tddrobo.agent._call_llm_structured", return_value=mock_bug_report),
+        patch("tddrobo.agent.save_history_snapshot"),
         patch("shutil.copy"),
     ):
         agent.generate_regression_bug_report(state_rollback)
@@ -3981,8 +3981,8 @@ def test_robust_self_correction_new_features(tmp_path, monkeypatch):
         raise OSError("Permission denied")
 
     with (
-        patch("agent._call_llm_structured", return_value=mock_bug_report),
-        patch("agent.save_history_snapshot"),
+        patch("tddrobo.agent._call_llm_structured", return_value=mock_bug_report),
+        patch("tddrobo.agent.save_history_snapshot"),
         patch("shutil.copy"),
         patch("os.remove", side_effect=mock_remove_fail),
     ):
@@ -4022,12 +4022,12 @@ def test_robust_self_correction_new_features(tmp_path, monkeypatch):
     assert f_bak_1.exists()
 
 
-@patch("agent._call_llm_structured")
+@patch("tddrobo.agent._call_llm_structured")
 def test_analyze_architecture(mock_llm):
     from unittest.mock import mock_open, patch
 
-    from agent import analyze_architecture
-    from schema import ArchitectureAudit
+    from tddrobo.agent import analyze_architecture
+    from tddrobo.schema import ArchitectureAudit
 
     mock_audit = ArchitectureAudit(
         classification="architectural_bottleneck",
@@ -4119,13 +4119,13 @@ def test_analyze_architecture(mock_llm):
 def test_agent_module_delattr():
     import sys
 
-    import agent
+    from tddrobo import agent
 
     # 1. Nonexistent attribute deletion (covers the except block)
     delattr(agent, "nonexistent_mock_attr")
 
     # 2. Existing attribute deletion on submodules propagation
     setattr(agent, "test_propagation_attr", "prop_val")
-    assert getattr(sys.modules["agent.nodes"], "test_propagation_attr") == "prop_val"
+    assert getattr(sys.modules["tddrobo.agent.nodes"], "test_propagation_attr") == "prop_val"
     delattr(agent, "test_propagation_attr")
-    assert not hasattr(sys.modules["agent.nodes"], "test_propagation_attr")
+    assert not hasattr(sys.modules["tddrobo.agent.nodes"], "test_propagation_attr")
