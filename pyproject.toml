@@ -1,0 +1,54 @@
+[project]
+name = "tddrobo"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "flake8>=7.3.0",
+    "google-genai>=2.3.0",
+    "langchain>=1.3.1",
+    "langgraph>=1.2.0",
+    "markdownify>=1.2.2",
+    "mlflow>=3.12.0",
+    "pytest>=9.0.3",
+    "python-dotenv>=1.2.2",
+    "requests>=2.34.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+    "pytest-mock>=3.15.1",
+    "ruff>=0.9.0",
+    "mypy>=1.15.0",
+]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore:'_UnionGenericAlias' is deprecated:DeprecationWarning:google.genai.types",
+    "ignore::UserWarning:google.genai._common",
+]
+norecursedirs = ["artifacts*", "mlartifacts*"]
+
+[tool.coverage.run]
+omit = [
+    "main.py",
+    "bc_clone_by_gemma4.py"
+]
+
+[tool.ruff]
+line-length = 120
+exclude = ["artifacts*", "mlartifacts*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.mypy]
+ignore_missing_imports = true
+check_untyped_defs = true
+exclude = [
+    "^artifacts",
+    "^mlartifacts",
+]

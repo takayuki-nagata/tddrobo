@@ -1,0 +1,27 @@
+# Environments
+.env
+.venv/
+env/
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Project artifacts and MLflow
+artifacts*/
+mlartifacts/
+mlruns/
+*.db
+
+# IDEs
+.vscode/
+.idea/
+
+# Coverage
+.coverage
+.coverage.*
