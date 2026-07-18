@@ -49,7 +49,13 @@ graph TD
     generate_unit_bug_report -->|should_fix_unit_tests_or_impl| cond_unit_bug{Decision}
     cond_unit_bug -->|implement_initial_logic| implement_initial_logic
     cond_unit_bug -->|generate_unit_tests| generate_unit_tests
-    cond_unit_bug -->|update_design_for_req| update_design_for_req
+    cond_unit_bug -->|analyze_architecture| analyze_architecture[🔍 analyze_architecture]
+    
+    analyze_architecture -->|should_route_from_audit| cond_audit{Decision}
+    cond_audit -->|update_design_for_req| update_design_for_req
+    cond_audit -->|implement_initial_logic| implement_initial_logic
+    cond_audit -->|implement_integration_logic| implement_integration_logic
+    cond_audit -->|implement_regression_logic| implement_regression_logic
 
     %% Integration Test Phase
     plan_integration_tests --> review_integration_test_plan[🔍 review_integration_test_plan]
@@ -77,7 +83,7 @@ graph TD
     generate_integration_bug_report -->|should_fix_integration_tests_or_impl| cond_integ_bug{Decision}
     cond_integ_bug -->|implement_integration_logic| implement_integration_logic
     cond_integ_bug -->|generate_integration_tests| generate_integration_tests
-    cond_integ_bug -->|update_design_for_req| update_design_for_req
+    cond_integ_bug -->|analyze_architecture| analyze_architecture
 
     %% Regression Phase
     run_regression_tests -->|should_continue_regression| cond_reg_run{Decision}
@@ -89,9 +95,9 @@ graph TD
 
     generate_regression_bug_report -->|should_fix_regression_tests_or_impl| cond_reg_bug{Decision}
     cond_reg_bug -->|implement_regression_logic| implement_regression_logic[💻 implement_regression_logic]
-    cond_reg_bug -->|update_design_for_req| update_design_for_req
     cond_reg_bug -->|generate_integration_tests| generate_integration_tests
     cond_reg_bug -->|generate_unit_tests| generate_unit_tests
+    cond_reg_bug -->|analyze_architecture| analyze_architecture
     cond_reg_bug -->|halt_regression_test_failure| END
     cond_reg_bug -->|END| END
 
@@ -139,6 +145,7 @@ The agent uses two models tailored for distinct tasks:
 *   **`review_design_initial`**: Audits the initial Software Design Document against the specifications to ensure completeness and accuracy. If the quality is rated below the target threshold (default 98%, up to 3 times), it provides comments to loop back and refine the initial design.
 *   **`update_design_for_req`**: Automatically refines the Design Document incrementally to support the active requirement.
 *   **`review_design_incremental`**: Audits the updated/incremental Software Design Document. If the quality is rated below the target threshold (default 98%, up to 3 times), it loops back to refine the incremental design. **Note**: During incremental design audits, future requirement details that are not yet active are explicitly ignored, preventing unnecessary design loops.
+*   **`analyze_architecture`**: Triggered when the workflow enters an implementation deadlock (loop). It performs an Architectural Audit using the primary model to classify the issue as either a local code-level bug or a design-level architectural bottleneck. If classified as a local bug, it bypasses design updates and routes directly back to the appropriate implementation node with specific refactoring instructions; otherwise, it routes to `update_design_for_req` for a design rollback.
 
 ### 2. Unit Testing Phase (Unit Red/Green Cycle)
 *   **`plan_unit_tests`**: Outlines a list of unit test cases based on the design component interfaces.
@@ -200,6 +207,7 @@ The state of the workflow is preserved in `TDDState` (defined in [schema.py](fil
     *   `impl_code`: Current application logic.
     *   `impl_updated`: Flag indicating whether the implementation was updated.
     *   `impl_check_output`: Output of flake8 checks or search/replace errors on the implementation.
+    *   `architecture_audit`: Stores the structured report of the architectural audit (bottleneck and refactoring plan).
 
 *   **Testing State**:
     *   `module_name` / `test_module_name`: Paths to files.
@@ -228,6 +236,8 @@ The state of the workflow is preserved in `TDDState` (defined in [schema.py](fil
     *   `target_test_plan_coverage` / `target_test_coverage`: Quality thresholds.
     *   `regression_failure_policy`: Configured behavior on historical regression test failure (`rollback` or `halt`).
     *   `rollback_counts`: Dictionary mapping requirement indexes (as strings) to the number of design rollbacks attempted for them (circuit breaker threshold is 2).
+    *   `loop_origin_node`: Name of the node where the implementation loop started (used to route local fixes back).
+    *   `audit_loop_count`: Number of consecutive architectural audits executed for the current loop (circuit breaker limit is configured via config.MAX_AUDIT_LOOP_COUNT).
     *   `success`: Flag indicating workflow completion.
     *   `readme_content`: Generated README data.
     *   `domain_tips`: Domain-specific hints injected dynamically.

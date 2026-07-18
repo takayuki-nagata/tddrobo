@@ -297,7 +297,10 @@ def main(args_list=None):
     except Exception:
         pass
 
-    if is_server_online:
+    env_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if env_uri:
+        mlflow.set_tracking_uri(env_uri)
+    elif is_server_online:
         mlflow.set_tracking_uri(mlflow_uri)
     else:
         local_db_uri = "sqlite:///mlflow.db"

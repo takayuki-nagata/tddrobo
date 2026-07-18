@@ -46,6 +46,7 @@ from prompts import (
     TEST_PLAN_ORACLE_CONSTRAINTS,
 )
 from schema import (
+    ArchitectureAudit,
     BugReport,
     DesignDocument,
     DesignReviewReport,
@@ -704,7 +705,8 @@ def update_design_for_req(state: TDDState):
     target_req_str = f"ID: {target_req.get('id')}\nDescription: {target_req.get('description')}"
 
     # Skip design updates if rollback was triggered purely by oracle mismatch
-    if state.get("oracle_discrepancy_only", False):
+    # BUT do not skip if a loop was detected (deadlocks must always update design)
+    if state.get("oracle_discrepancy_only", False) and not state.get("loop_detected", False):
         print(f"[TDD Robo] 📐 Skipping design update for {target_req.get('id')} (reason: pure oracle discrepancy).")
         formatted_design = state.get("design_doc", "")
         if not formatted_design:
@@ -792,18 +794,15 @@ def update_design_for_req(state: TDDState):
         )
 
         if state.get("loop_detected"):
-            last_test_output = state.get("test_output", "")
-            if last_test_output:
-                snippet = _get_balanced_test_output_context(last_test_output, max_chars=3500)
-                loop_note = (
-                    "\n\n# ⚠️ DESIGN ROLLBACK TRIGGERED BY IMPLEMENTATION LOOP\n"
-                    "The previous design revision led to a stuck implementation loop. "
-                    "The following test output shows what was failing when the loop was detected. "
-                    "Please identify and fix the architectural root cause that made it impossible "
-                    "to satisfy all tests simultaneously.\n"
-                    f"<loop_failure_context>\n{snippet}\n</loop_failure_context>\n"
-                )
-                prompt += loop_note
+            refactor_directive_path = os.path.join(
+                os.path.dirname(__file__), "prompts/generate_design_refactor_directive.md"
+            )
+            try:
+                with open(refactor_directive_path, "r", encoding="utf-8") as f:
+                    refactor_directive = f.read()
+                prompt += "\n\n" + refactor_directive.format(architecture_audit=state.get("architecture_audit", ""))
+            except Exception as e:  # pragma: no cover
+                print(f"[TDD Robo] ⚠️ Warning: Failed to load generate_design_refactor_directive.md: {e}")
 
         design_doc_obj = _call_llm_structured(prompt, DesignDocument)
 
@@ -2006,11 +2005,13 @@ def _build_impl_prompt(
         )
 
     if state.get("loop_detected"):
-        loop_warning = (
-            "\n\n# WARNING: IMPLEMENTATION TOGGLE LOOP DETECTED!\n"
-            "The workflow is stuck in a cycle. Analyze all unit/regression tests and find a unified solution.\n"
-        )
-        prompt += loop_warning
+        refactor_mandate_path = os.path.join(os.path.dirname(__file__), "prompts/implement_logic_refactor_mandate.md")
+        try:
+            with open(refactor_mandate_path, "r", encoding="utf-8") as f:
+                refactor_mandate = f.read()
+            prompt += "\n\n" + refactor_mandate
+        except Exception as e:  # pragma: no cover
+            print(f"[TDD Robo] ⚠️ Warning: Failed to load implement_logic_refactor_mandate.md: {e}")
 
     if design_updated:
         design_update_instruction = (
@@ -2511,6 +2512,28 @@ def _run_oracle_verification_on_failures(test_output: str, tests_code: str, stat
     return "No assertion discrepancies detected by the oracle."
 
 
+def _has_implementation_exceptions(test_output: str, impl_name: str) -> bool:
+    """Check if the test output contains unhandled Python exceptions from the implementation code."""
+    if not test_output:
+        return False
+    exception_patterns = [
+        r"SyntaxError:",
+        r"NameError:",
+        r"AttributeError:",
+        r"RuntimeError:",
+        r"TypeError:",
+        r"ZeroDivisionError:",
+        r"IndexError:",
+        r"KeyError:",
+        r"ValueError:",
+    ]
+    has_exc_message = any(re.search(pat, test_output) for pat in exception_patterns)
+    # Matches only exact occurrences of the implementation name (e.g. not matched inside test_py_bc.py)
+    pattern = r"(?:^|/|\\|\s|['\"])" + re.escape(impl_name) + r"(?:$|\s|['\"]|:)"
+    references_impl = bool(re.search(pattern, test_output))
+    return has_exc_message and references_impl
+
+
 def generate_unit_bug_report(state: TDDState):
     """Generate a bug report diagnosing unit test failures."""
     _update_req_progress(state)
@@ -2538,8 +2561,15 @@ def generate_unit_bug_report(state: TDDState):
     bug_report_obj = _call_llm_structured(prompt, BugReport, model_name=MODEL_PRIMARY)
 
     if "ORACLE VERIFICATION FEEDBACK" in oracle_feedback:
-        print("[TDD Robo] 🔮 Oracle discrepancy detected. Overriding target_to_fix to 'generate_tests'.")
-        bug_report_obj.target_to_fix = "generate_tests"
+        impl_name = state.get("module_name", "impl.py")
+        if _has_implementation_exceptions(state.get("test_output", ""), impl_name):
+            print(
+                "[TDD Robo] 🔮 Oracle discrepancy detected, but implementation exceptions were found. "
+                f"Prioritizing '{bug_report_obj.target_to_fix}'."
+            )
+        else:
+            print("[TDD Robo] 🔮 Oracle discrepancy detected. Overriding target_to_fix to 'generate_tests'.")
+            bug_report_obj.target_to_fix = "generate_tests"
 
     report_md = "### Failed Unit Test Cases\n"
     for t in bug_report_obj.failed_test_cases:
@@ -2548,7 +2578,12 @@ def generate_unit_bug_report(state: TDDState):
     report_md += f"### Fix Instructions\n{bug_report_obj.fix_instructions}\n"
 
     print(f"[TDD Robo] ✅ Unit Bug report generated. Target to fix: {bug_report_obj.target_to_fix}")
-    return {"bug_report": report_md, "next_action": bug_report_obj.target_to_fix}
+    return {
+        "bug_report": report_md,
+        "next_action": bug_report_obj.target_to_fix,
+        "oracle_discrepancy_only": False,
+        "loop_origin_node": "implement_initial_logic",
+    }
 
 
 def generate_integration_bug_report(state: TDDState):
@@ -2578,8 +2613,15 @@ def generate_integration_bug_report(state: TDDState):
     bug_report_obj = _call_llm_structured(prompt, BugReport, model_name=MODEL_PRIMARY)
 
     if "ORACLE VERIFICATION FEEDBACK" in oracle_feedback:
-        print("[TDD Robo] 🔮 Oracle discrepancy detected. Overriding target_to_fix to 'generate_tests'.")
-        bug_report_obj.target_to_fix = "generate_tests"
+        impl_name = state.get("module_name", "impl.py")
+        if _has_implementation_exceptions(state.get("test_output", ""), impl_name):
+            print(
+                "[TDD Robo] 🔮 Oracle discrepancy detected, but implementation exceptions were found. "
+                f"Prioritizing '{bug_report_obj.target_to_fix}'."
+            )
+        else:
+            print("[TDD Robo] 🔮 Oracle discrepancy detected. Overriding target_to_fix to 'generate_tests'.")
+            bug_report_obj.target_to_fix = "generate_tests"
 
     report_md = "### Failed Integration Test Cases\n"
     for t in bug_report_obj.failed_test_cases:
@@ -2588,7 +2630,12 @@ def generate_integration_bug_report(state: TDDState):
     report_md += f"### Fix Instructions\n{bug_report_obj.fix_instructions}\n"
 
     print(f"[TDD Robo] ✅ Integration Bug report generated. Target to fix: {bug_report_obj.target_to_fix}")
-    return {"bug_report": report_md, "next_action": bug_report_obj.target_to_fix}
+    return {
+        "bug_report": report_md,
+        "next_action": bug_report_obj.target_to_fix,
+        "oracle_discrepancy_only": False,
+        "loop_origin_node": "implement_integration_logic",
+    }
 
 
 def _get_regression_test_code_context() -> str:
@@ -2945,6 +2992,7 @@ def generate_regression_bug_report(state: TDDState):
                     "oracle_discrepancy_only": "ORACLE VERIFICATION FEEDBACK" in oracle_feedback,
                     "loop_detected": True,
                     "design_iterations": 0,
+                    "loop_origin_node": "implement_regression_logic",
                     "unit_test_plan": None,
                     "integration_test_plan": None,
                     "unit_tests_code": "",
@@ -2957,7 +3005,12 @@ def generate_regression_bug_report(state: TDDState):
                     ret_val["design_doc"] = design_restored_content
                 return ret_val
 
-    return {"bug_report": report_md, "next_action": bug_report_obj.target_to_fix}
+    return {
+        "bug_report": report_md,
+        "next_action": bug_report_obj.target_to_fix,
+        "oracle_discrepancy_only": False,
+        "loop_origin_node": "implement_regression_logic",
+    }
 
 
 def generate_refactor_bug_report(state: TDDState):
@@ -3017,6 +3070,102 @@ def generate_refactor_bug_report(state: TDDState):
 
     print(f"[TDD Robo] ✅ Refactor Bug report generated. Target to fix: {bug_report_obj.target_to_fix}")
     return {"bug_report": report_md, "next_action": bug_report_obj.target_to_fix}
+
+
+def analyze_architecture(state: TDDState) -> dict:
+    """Perform an Architectural Audit when stuck in an implementation deadlock."""
+    print("[TDD Robo] 🔍 Initiating Architectural Audit to break the implementation deadlock...")
+
+    audit_loop_count = state.get("audit_loop_count", 0) + 1
+    max_audit_loop_count = getattr(config, "MAX_AUDIT_LOOP_COUNT", 2)
+
+    spec_path = os.path.join(config.ARTIFACTS_DIR, "specification.txt")
+    spec_content = ""
+    if os.path.exists(spec_path):
+        try:
+            with open(spec_path, "r", encoding="utf-8") as f:
+                spec_content = f.read()
+        except Exception as e:  # pragma: no cover
+            print(f"[TDD Robo] ⚠️ Warning: Failed to read specification.txt: {e}")
+
+    reqs = state.get("requirements", [])
+    idx = state.get("current_req_index", 0)
+    target_req_str = ""
+    if idx < len(reqs):
+        target_req = reqs[idx]
+        target_req_str = f"ID: {target_req.get('id')}\nDescription: {target_req.get('description')}"
+
+    impl_code = state.get("impl_code", "")
+    tests_code = _get_combined_tests_code(state)
+    test_output = state.get("test_output", "")
+
+    prompt_path = os.path.join(os.path.dirname(__file__), "prompts/analyze_architecture.md")
+    try:
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            prompt_template = f.read()
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError(f"Failed to load prompts/analyze_architecture.md: {e}")
+
+    prompt = prompt_template.format(
+        spec_content=spec_content,
+        target_req_str=target_req_str,
+        impl_code=impl_code,
+        tests_code=tests_code,
+        test_output=_get_balanced_test_output_context(test_output, max_chars=4000),
+    )
+
+    audit_data = _call_llm_structured(prompt, ArchitectureAudit, model_name=MODEL_PRIMARY)
+
+    classification = audit_data.classification
+    # Circuit breaker: If we have repeatedly tried to fix local bugs but failed, escalate to architectural_bottleneck
+    if audit_loop_count >= max_audit_loop_count:
+        print(
+            f"[TDD Robo] 🚨 Circuit Breaker: Consecutive audits count {audit_loop_count} >= {max_audit_loop_count}. "
+            "Escalating local bug to architectural_bottleneck to force design rollback."
+        )
+        classification = "architectural_bottleneck"
+
+    audit_report_text = (
+        f"Classification:\n{classification}\n\n"
+        f"Architectural Bottleneck:\n{audit_data.architectural_bottleneck}\n\n"
+        f"Refactoring Plan:\n{audit_data.refactoring_plan}\n\n"
+        f"Safeties and Invariants:\n{audit_data.safeties_and_invariants}"
+    )
+
+    print("\n=== [Architectural Audit Report] ===")
+    print(audit_report_text)
+    print("====================================\n")
+
+    if classification == "local_bug":
+        next_action = state.get("loop_origin_node", "implement_initial_logic")
+        bug_report = (
+            f"### Loop Audit Diagnosis (Local Bug)\n{audit_data.architectural_bottleneck}\n\n"
+            f"### Local Fix Plan\n{audit_data.refactoring_plan}\n\n"
+            f"### Invariants & Safeties to Preserve\n{audit_data.safeties_and_invariants}"
+        )
+        print(
+            f"[TDD Robo] 🔄 Routing back to {next_action} to apply local fixes. "
+            f"Attempt {audit_loop_count}/{max_audit_loop_count}."
+        )
+        return {
+            "architecture_audit": audit_report_text,
+            "loop_detected": True,
+            "oracle_discrepancy_only": False,
+            "next_action": next_action,
+            "bug_report": bug_report,
+            "iterations": 0,
+            "stagnant_iterations": 0,
+            "audit_loop_count": audit_loop_count,
+        }
+    else:
+        print("[TDD Robo] 📐 Routing to update_design_for_req to update design document.")
+        return {
+            "architecture_audit": audit_report_text,
+            "loop_detected": True,
+            "oracle_discrepancy_only": False,
+            "next_action": "update_design_for_req",
+            "audit_loop_count": 0,  # Reset loop count once we actually roll back to design
+        }
 
 
 def decide_refactor(state: TDDState):
@@ -3206,6 +3355,7 @@ def increment_requirement(state: TDDState):
         "stagnant_iterations": 0,
         "last_test_summary": "",
         "oracle_discrepancy_only": False,
+        "audit_loop_count": 0,
     }
     if state.get("impl_code"):
         ret_val["last_green_impl_code"] = state.get("impl_code", "")
@@ -3450,16 +3600,13 @@ def should_continue_regression(state: TDDState):
 
 def should_fix_unit_tests_or_impl(state: TDDState):
     """Determine next action for unit failures, with toggle loop detection."""
+    if _detect_toggle_loop(state):
+        print("[TDD Robo] 🔄 Loop Detector Override: Stuck in loop. Transitioning to analyze_architecture.")
+        return "analyze_architecture"
+
     next_act = state.get("next_action", "implement_initial_logic")
     if next_act == "implement_logic":
         next_act = "implement_initial_logic"
-    if next_act == "implement_initial_logic":
-        if _detect_toggle_loop(state):
-            print(
-                "[TDD Robo] 🔄 Loop Detector Override: Stuck in implementation loop. "
-                "Rolling back to update_design_for_req."
-            )
-            return "update_design_for_req"
     if next_act == "generate_tests":
         return "generate_unit_tests"
     return next_act
@@ -3467,16 +3614,13 @@ def should_fix_unit_tests_or_impl(state: TDDState):
 
 def should_fix_integration_tests_or_impl(state: TDDState):
     """Determine next action for integration failures, with toggle loop detection."""
+    if _detect_toggle_loop(state):
+        print("[TDD Robo] 🔄 Loop Detector Override: Stuck in loop. Transitioning to analyze_architecture.")
+        return "analyze_architecture"
+
     next_act = state.get("next_action", "implement_integration_logic")
     if next_act == "implement_logic":
         next_act = "implement_integration_logic"
-    if next_act == "implement_integration_logic":
-        if _detect_toggle_loop(state):
-            print(
-                "[TDD Robo] 🔄 Loop Detector Override: Stuck in implementation loop. "
-                "Rolling back to update_design_for_req."
-            )
-            return "update_design_for_req"
     if next_act == "generate_tests":
         return "generate_integration_tests"
     return next_act
@@ -3484,16 +3628,13 @@ def should_fix_integration_tests_or_impl(state: TDDState):
 
 def should_fix_regression_tests_or_impl(state: TDDState):
     """Determine next action for regression failures, with toggle loop detection."""
+    if _detect_toggle_loop(state):
+        print("[TDD Robo] 🔄 Loop Detector Override: Stuck in loop. Transitioning to analyze_architecture.")
+        return "analyze_architecture"
+
     next_act = state.get("next_action", "implement_regression_logic")
     if next_act == "implement_logic":
         next_act = "implement_regression_logic"
-    if next_act == "implement_regression_logic":
-        if _detect_toggle_loop(state):
-            print(
-                "[TDD Robo] 🔄 Loop Detector Override: Stuck in implementation loop. "
-                "Rolling back to update_design_for_req."
-            )
-            return "update_design_for_req"
     if next_act == "generate_design":
         return "update_design_for_req"
     if next_act == "generate_tests":
@@ -3584,6 +3725,11 @@ def should_continue_workflow(state: TDDState):
     return "generate_readme"
 
 
+def should_route_from_audit(state: TDDState):
+    """Determine the next node to route to from architectural audit."""
+    return state.get("next_action", "update_design_for_req")
+
+
 # --- Graph Construction ---
 class TDDAgent:
     """
@@ -3646,6 +3792,7 @@ class TDDAgent:
         # Finalization nodes
         workflow.add_node("increment_requirement", increment_requirement)
         workflow.add_node("generate_readme", generate_readme)
+        workflow.add_node("analyze_architecture", analyze_architecture)
 
         # Graph wiring
         workflow.set_entry_point("fetch_spec")
@@ -3717,6 +3864,7 @@ class TDDAgent:
                 "implement_initial_logic": "implement_initial_logic",
                 "generate_unit_tests": "generate_unit_tests",
                 "update_design_for_req": "update_design_for_req",
+                "analyze_architecture": "analyze_architecture",
             },
         )
 
@@ -3767,6 +3915,7 @@ class TDDAgent:
                 "implement_integration_logic": "implement_integration_logic",
                 "generate_integration_tests": "generate_integration_tests",
                 "update_design_for_req": "update_design_for_req",
+                "analyze_architecture": "analyze_architecture",
             },
         )
 
@@ -3790,6 +3939,7 @@ class TDDAgent:
                 "update_design_for_req": "update_design_for_req",
                 "generate_integration_tests": "generate_integration_tests",
                 "generate_unit_tests": "generate_unit_tests",
+                "analyze_architecture": "analyze_architecture",
                 "halt_regression_test_failure": END,
             },
         )
@@ -3839,5 +3989,15 @@ class TDDAgent:
             },
         )
         workflow.add_edge("generate_readme", END)
+        workflow.add_conditional_edges(
+            "analyze_architecture",
+            should_route_from_audit,
+            {
+                "update_design_for_req": "update_design_for_req",
+                "implement_initial_logic": "implement_initial_logic",
+                "implement_integration_logic": "implement_integration_logic",
+                "implement_regression_logic": "implement_regression_logic",
+            },
+        )
 
         return workflow.compile(checkpointer=self.checkpointer)

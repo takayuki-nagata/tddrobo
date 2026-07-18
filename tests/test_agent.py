@@ -45,6 +45,7 @@ from agent import (
     should_review_integration_tests_or_continue,
     should_review_test_plan_or_continue,
     should_review_unit_tests_or_continue,
+    should_route_from_audit,
     should_run_integration_tests,
     should_run_regression_after_refactor,
     should_run_regression_tests,
@@ -277,7 +278,7 @@ def test_update_design_for_req_with_failure_context(mock_save_artifact, mock_llm
     assert "Previous Implementation Failure Context" in called_prompt
     assert "Expected '3.33333', got '3'." in called_prompt
     assert "test failed: division scale precision error" in called_prompt
-    assert "DESIGN ROLLBACK TRIGGERED BY IMPLEMENTATION LOOP" in called_prompt
+    assert "CRITICAL REFRACTOR DIRECTIVE" in called_prompt
 
 
 @patch("agent.save_artifact")
@@ -648,9 +649,14 @@ def test_conditional_routing_edges():
         == "generate_regression_bug_report"
     )
 
+    # should_route_from_audit
+    assert should_route_from_audit({"next_action": "implement_initial_logic"}) == "implement_initial_logic"
+    assert should_route_from_audit({"next_action": "update_design_for_req"}) == "update_design_for_req"
+    assert should_route_from_audit({}) == "update_design_for_req"
+
     # should_fix_unit_tests_or_impl
     with patch("agent._detect_toggle_loop", return_value=True):
-        assert should_fix_unit_tests_or_impl({"next_action": "implement_initial_logic"}) == "update_design_for_req"
+        assert should_fix_unit_tests_or_impl({"next_action": "implement_initial_logic"}) == "analyze_architecture"
     with patch("agent._detect_toggle_loop", return_value=False):
         assert should_fix_unit_tests_or_impl({"next_action": "implement_initial_logic"}) == "implement_initial_logic"
     assert should_fix_unit_tests_or_impl({"next_action": "generate_tests"}) == "generate_unit_tests"
@@ -659,9 +665,9 @@ def test_conditional_routing_edges():
     with patch("agent._detect_toggle_loop", return_value=True):
         assert (
             should_fix_integration_tests_or_impl({"next_action": "implement_integration_logic"})
-            == "update_design_for_req"
+            == "analyze_architecture"
         )
-        assert should_fix_integration_tests_or_impl({"next_action": "implement_logic"}) == "update_design_for_req"
+        assert should_fix_integration_tests_or_impl({"next_action": "implement_logic"}) == "analyze_architecture"
     with patch("agent._detect_toggle_loop", return_value=False):
         assert (
             should_fix_integration_tests_or_impl({"next_action": "implement_integration_logic"})
@@ -673,10 +679,9 @@ def test_conditional_routing_edges():
     # should_fix_regression_tests_or_impl
     with patch("agent._detect_toggle_loop", return_value=True):
         assert (
-            should_fix_regression_tests_or_impl({"next_action": "implement_regression_logic"})
-            == "update_design_for_req"
+            should_fix_regression_tests_or_impl({"next_action": "implement_regression_logic"}) == "analyze_architecture"
         )
-        assert should_fix_regression_tests_or_impl({"next_action": "implement_logic"}) == "update_design_for_req"
+        assert should_fix_regression_tests_or_impl({"next_action": "implement_logic"}) == "analyze_architecture"
     with patch("agent._detect_toggle_loop", return_value=False):
         assert (
             should_fix_regression_tests_or_impl({"next_action": "implement_regression_logic"})
@@ -3894,3 +3899,89 @@ def test_robust_self_correction_new_features(tmp_path, monkeypatch):
     f_bak_2 = history_dir / "impl_req001_test_iter001_impl_iter001.py.bak.2"
     assert f_bak_2.exists()
     assert f_bak_1.exists()
+
+
+@patch("agent._call_llm_structured")
+def test_analyze_architecture(mock_llm):
+    from unittest.mock import mock_open, patch
+
+    from agent import analyze_architecture
+    from schema import ArchitectureAudit
+
+    mock_audit = ArchitectureAudit(
+        classification="architectural_bottleneck",
+        architectural_bottleneck="conflation of statement and expression",
+        refactoring_plan="1. split executor",
+        safeties_and_invariants="preserve semicolons",
+    )
+    mock_llm.return_value = mock_audit
+
+    state = TDDState(
+        requirements=[{"id": "REQ001", "description": "arithmetic"}],
+        current_req_index=0,
+        impl_code="a=1",
+        test_output="failed assertion",
+    )
+
+    # 1. Spec file doesn't exist (architectural_bottleneck)
+    with patch("os.path.exists", return_value=False):
+        res = analyze_architecture(state)
+        assert res["loop_detected"] is True
+        assert "conflation of statement and expression" in res["architecture_audit"]
+        assert "split executor" in res["architecture_audit"]
+        assert "preserve semicolons" in res["architecture_audit"]
+        assert res["next_action"] == "update_design_for_req"
+        assert res["audit_loop_count"] == 0
+
+    # 2. Spec file exists (architectural_bottleneck)
+    with patch("os.path.exists", return_value=True):
+        with patch("builtins.open", mock_open(read_data="POSIX bc specification")):
+            res = analyze_architecture(state)
+            assert res["loop_detected"] is True
+            assert "conflation of statement and expression" in res["architecture_audit"]
+            assert res["next_action"] == "update_design_for_req"
+
+    # 3. Local bug classification routing
+    mock_audit_local = ArchitectureAudit(
+        classification="local_bug",
+        architectural_bottleneck="local typo in parser",
+        refactoring_plan="fix token check at line 50",
+        safeties_and_invariants="preserve parser state",
+    )
+    mock_llm.return_value = mock_audit_local
+
+    state_local = TDDState(
+        requirements=[{"id": "REQ001", "description": "arithmetic"}],
+        current_req_index=0,
+        impl_code="a=1",
+        test_output="failed assertion",
+        loop_origin_node="implement_integration_logic",
+        audit_loop_count=0,
+    )
+    with patch("os.path.exists", return_value=False):
+        res = analyze_architecture(state_local)
+        assert res["loop_detected"] is True
+        assert res["next_action"] == "implement_integration_logic"
+        assert "local typo in parser" in res["bug_report"]
+        assert "fix token check" in res["bug_report"]
+        assert res["audit_loop_count"] == 1
+        assert res["iterations"] == 0
+        assert res["stagnant_iterations"] == 0
+
+    # 4. Circuit breaker escalation (2nd attempt forces architectural_bottleneck)
+    state_circuit = TDDState(
+        requirements=[{"id": "REQ001", "description": "arithmetic"}],
+        current_req_index=0,
+        impl_code="a=1",
+        test_output="failed assertion",
+        loop_origin_node="implement_initial_logic",
+        audit_loop_count=1,
+    )
+    with patch("os.path.exists", return_value=False):
+        res = analyze_architecture(state_circuit)
+        assert res["loop_detected"] is True
+        # Escalates to update_design_for_req
+        assert res["next_action"] == "update_design_for_req"
+        assert res["audit_loop_count"] == 0
+        # Classification in report is updated to architectural_bottleneck
+        assert "Classification:\narchitectural_bottleneck" in res["architecture_audit"]

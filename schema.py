@@ -66,6 +66,9 @@ class TDDState(TypedDict, total=False):
     oracle_discrepancy_only: bool
     failed_files: list[str]
     rollback_counts: dict[str, int]
+    architecture_audit: str
+    loop_origin_node: str
+    audit_loop_count: int
 
 
 class DesignReviewReport(BaseModel):
@@ -227,4 +230,24 @@ class OracleDiscrepancyJudgment(BaseModel):
             "The corrected expected value if it is a test plan error (e.g. '16.2' instead of 'Prints 16.2'). "
             "Should align with the actual oracle output."
         ),
+    )
+
+
+class ArchitectureAudit(BaseModel):
+    classification: Literal["local_bug", "architectural_bottleneck"] = Field(
+        description=(
+            "Categorize the bottleneck. 'local_bug' if the deadlock is caused by a local mistake or code typo "
+            "in the implementation (e.g. incorrect token pattern, missing case) which does not require "
+            "updating the Software Design Document. 'architectural_bottleneck' if it is a design-level mismatch "
+            "that requires updating the design document first."
+        )
+    )
+    architectural_bottleneck: str = Field(
+        description="A detailed analysis explaining the structural flaw that caused the implementation deadlock."
+    )
+    refactoring_plan: str = Field(
+        description="Step-by-step decoupling or class restructuring instructions to prepare the codebase."
+    )
+    safeties_and_invariants: str = Field(
+        description="Essential software invariants, grammar rules, delimiters, and boundary conditions to preserve."
     )
