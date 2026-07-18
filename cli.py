@@ -9,7 +9,7 @@ import mlflow
 
 import config
 from agent import TDDAgent
-from logger import print
+from logger import logger, print
 from utils import FileMemorySaver
 
 DEFAULT_IMPL_NAME = config.DEFAULT_IMPL_NAME
@@ -150,35 +150,21 @@ def prepare_artifacts_directory(artifacts_dir, should_resume):
                     has_run_artifacts = True
                     break
         if has_run_artifacts:
-            readme_path = os.path.join(artifacts_dir, "README.md")
-            if os.path.exists(readme_path):
-                timestamp = time.strftime("%Y%m%d_%H%M%S")
-                backup_dir = f"{artifacts_dir}_{timestamp}"
-                os.makedirs(backup_dir, exist_ok=True)
-                for entry_name in os.listdir(artifacts_dir):
-                    if entry_name != ".session.lock":
-                        file_path = os.path.join(artifacts_dir, entry_name)
-                        shutil.move(file_path, os.path.join(backup_dir, entry_name))
-                print(f"📦 Backed up existing artifacts to {backup_dir}")
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            backup_dir = f"{artifacts_dir}_{timestamp}"
+            os.makedirs(backup_dir, exist_ok=True)
+            for entry_name in os.listdir(artifacts_dir):
+                if entry_name != ".session.lock":
+                    file_path = os.path.join(artifacts_dir, entry_name)
+                    shutil.move(file_path, os.path.join(backup_dir, entry_name))
+            print(f"📦 Backed up existing artifacts to {backup_dir}")
 
-                old_spec_path = os.path.join(backup_dir, "specification.txt")
-                if os.path.exists(old_spec_path):
-                    shutil.copy2(old_spec_path, os.path.join(artifacts_dir, "specification.txt"))
-            else:
-                print(f"[TDD Robo] 🧹 Cleaning up existing session artifacts in '{artifacts_dir}'...")
-                for entry_name in os.listdir(artifacts_dir):
-                    if entry_name not in ("specification.txt", ".session.lock"):
-                        file_path = os.path.join(artifacts_dir, entry_name)
-                        try:
-                            if os.path.isfile(file_path) or os.path.islink(file_path):
-                                os.remove(file_path)
-                            elif os.path.isdir(file_path):
-                                shutil.rmtree(file_path)
-                        except Exception as e:
-                            print(f"⚠️ Failed to delete {file_path}. Reason: {e}")
+            old_spec_path = os.path.join(backup_dir, "specification.txt")
+            if os.path.exists(old_spec_path):
+                shutil.copy2(old_spec_path, os.path.join(artifacts_dir, "specification.txt"))
 
 
-def initialize_mlflow(should_resume, run_name):
+def initialize_mlflow(should_resume, run_name, artifacts_dir):
     """Configures MLflow tracking with automatic local fallback and autologging."""
     mlflow_uri = config.MLFLOW_DEFAULT_URI
     is_server_online = False
@@ -204,9 +190,22 @@ def initialize_mlflow(should_resume, run_name):
     elif is_server_online:
         mlflow.set_tracking_uri(mlflow_uri)
     else:
-        local_db_uri = config.MLFLOW_LOCAL_DB_URI
+        local_db_path = os.path.join(artifacts_dir, "mlflow.db")
+        local_db_uri = f"sqlite:///{os.path.abspath(local_db_path)}"
         print(f"\nℹ️ MLflow server at {mlflow_uri} is offline. Falling back to local database ({local_db_uri}).")
         mlflow.set_tracking_uri(local_db_uri)
+
+        # Set custom local artifact location so mlruns is created inside artifacts_dir
+        try:
+            from mlflow.tracking import MlflowClient
+
+            client = MlflowClient()
+            exp = client.get_experiment_by_name(config.MLFLOW_EXPERIMENT_NAME)
+            if exp is None:
+                artifact_uri = f"file:///{os.path.abspath(os.path.join(artifacts_dir, 'mlruns'))}"
+                mlflow.create_experiment(config.MLFLOW_EXPERIMENT_NAME, artifact_location=artifact_uri)
+        except Exception as e:
+            print(f"Warning: Could not create local MLflow experiment: {e}")
 
     mlflow.set_experiment(config.MLFLOW_EXPERIMENT_NAME)
     try:
@@ -350,6 +349,11 @@ def main(args_list=None):
     else:
         prepare_artifacts_directory(artifacts_dir, should_resume)
 
+    # Initialize file logging after preparing the directory (to avoid backing up the newly created log file
+    # and preventing it from being moved to the archived directory during a fresh run setup)
+    log_file_path = os.path.join(artifacts_dir, "workflow.log")
+    logger.add_file_handler(log_file_path)
+
     # Update config metadata for future resumes
     with open(config_meta_path, "w", encoding="utf-8") as meta_f:
         json.dump(current_config_meta, meta_f, indent=2)
@@ -385,7 +389,7 @@ def main(args_list=None):
     config.ORACLE_VERIFIER = evaluate_math_expression
 
     # Configure MLflow
-    initialize_mlflow(should_resume, config.RUN_NAME)
+    initialize_mlflow(should_resume, config.RUN_NAME, artifacts_dir)
 
     print("\n🚀 Invoking the TDD Agent Workflow...")
     with mlflow.start_run(run_name=config.RUN_NAME):
