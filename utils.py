@@ -575,8 +575,10 @@ class GenAIClient:
         Returns:
             str: The generated text from the LLM.
         """
+        attempt = 0
+        standard_attempt = 0
         degen_count = 0
-        for attempt in range(retries):
+        while standard_attempt < retries:
             if degen_count == 0:
                 current_temp = temperature
                 active_prompt = prompt
@@ -605,11 +607,23 @@ class GenAIClient:
                 if response_schema:
                     config_kwargs["response_mime_type"] = "application/json"
                     config_kwargs["response_schema"] = response_schema
-                if thinking_level and ("gemma" in model_name.lower() or "thinking" in model_name.lower()):
-                    config_kwargs["thinking_config"] = types.ThinkingConfig(
-                        thinking_level=thinking_level.upper(),  # type: ignore[arg-type]
-                        include_thoughts=True,
-                    )
+                if thinking_level and (
+                    "gemma" in model_name.lower() or "thinking" in model_name.lower() or "gemini" in model_name.lower()
+                ):
+                    if "gemini" in model_name.lower():
+                        # For Gemini models, set only thinking_budget to prevent conflict with thinking_level.
+                        # Minimum valid budget is 1024.
+                        budget = 1024 if thinking_level.upper() == "MINIMAL" else 2048
+                        config_kwargs["thinking_config"] = types.ThinkingConfig(
+                            include_thoughts=True,
+                            thinking_budget=budget,
+                        )
+                    else:
+                        # For Gemma models, set thinking_level.
+                        config_kwargs["thinking_config"] = types.ThinkingConfig(
+                            thinking_level=thinking_level.upper(),  # type: ignore[arg-type]
+                            include_thoughts=True,
+                        )
                 if tools:
                     config_kwargs["tools"] = tools
                 genai_config = types.GenerateContentConfig(**config_kwargs)
@@ -727,15 +741,33 @@ class GenAIClient:
                     import re as _re
 
                     retry_match = _re.search(r"retry in (\d+(?:\.\d+)?)s", str(e), _re.IGNORECASE)
+
+                    is_daily_limit = "daily" in err_str or "per day" in err_str or "perday" in err_str
+
                     if retry_match:
                         suggested_delay = int(float(retry_match.group(1))) + 5
                         sleep_delay = max(suggested_delay, exp_delay) + jitter
                     else:
                         sleep_delay = exp_delay + jitter
+
+                    # If the delay is very long (more than 180 seconds) or daily quota is exceeded, fail immediately
+                    if is_daily_limit or sleep_delay > 180:
+                        print(f"\n🚨 Daily or long-term quota exceeded: {str(e)}. Aborting retry loop.")
+                        is_retryable = False
+                    else:
+                        # For minor temporary rate limits, wait out without incrementing 'standard_attempt'
+                        # But increment 'attempt' to scale up the exponential backoff delay correctly
+                        print(
+                            f"\n⏳ Temporary quota limit hit ({str(e)}). Sleeping for {sleep_delay}s before retrying. "
+                            f"(Attempts remaining: {retries - standard_attempt})"
+                        )
+                        time.sleep(sleep_delay)
+                        attempt += 1
+                        continue
                 elif "connect" in type(e).__name__.lower() or "connection" in str(e).lower():
                     is_retryable = True
 
-                if is_retryable and attempt < retries - 1:
+                if is_retryable and standard_attempt < retries - 1:
                     if is_degeneration:
                         degen_count += 1
                     # Fallback strategy: If secondary model fails repeatedly (5+ attempts),
@@ -755,9 +787,12 @@ class GenAIClient:
                         next_temp = temperature + (target_temp - temperature) * (1.0 - 0.5**degen_count)
                     print(
                         f"\n⚠️ Recoverable error ({str(e)}). Retrying in {sleep_delay} seconds... "
-                        f"(Next temp: {next_temp:.3f}, Attempt: {attempt + 1}/{retries}, Active model: {model_name})"
+                        f"(Next temp: {next_temp:.3f}, Attempt: {standard_attempt + 1}/{retries}, "
+                        f"Active model: {model_name})"
                     )
                     time.sleep(sleep_delay)
+                    attempt += 1
+                    standard_attempt += 1
                 else:
                     raise
         return ""

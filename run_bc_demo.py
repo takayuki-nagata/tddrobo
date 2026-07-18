@@ -38,7 +38,7 @@ def parse_outputs(stdout: str) -> dict[str, str]:
 if __name__ == "__main__":
     args_list = sys.argv[1:]
 
-    MATH_DOMAIN_TIPS = (
+    BC_DOMAIN_TIPS = (
         "\n# Mathematical Library Specification:\n"
         "- When calculating transcendental and library functions under arbitrary precision:\n"
         "  - Trigonometric, logarithmic, and exponential functions are "
@@ -51,25 +51,47 @@ if __name__ == "__main__":
         "or Newton-Raphson method.\n"
         "    - J_n(x): Bessel function j(n, x) is defined as "
         "sum( (-1)^k * (x/2)^(2k+n) / (k! * (n+k)!) ).\n"
+        "\n# Output Printing and Statement Evaluation Rules:\n"
+        '- Under both interactive and non-interactive modes, every "expression statement" '
+        "(an expression that does not contain an assignment or function definition) must "
+        "output its calculated value followed by a newline when evaluated.\n"
+        "- This printing rule applies recursively to expressions evaluated within blocks "
+        "(such as inside 'if' statements, 'while' loops, 'for' loops) and inside user-defined functions.\n"
+        "  - For example, executing `define f(){ 1; return 0 }; f()` must print both `1` "
+        "(the expression inside the function body) and `0` (the return value of the call).\n"
+        "  - Executing `if (1) { 1; 2 }` must print both `1` and `2`.\n"
+        "- Assignment statements (e.g., `x = 5`, `x += 1`) and function definitions "
+        "(e.g., `define f() { ... }`) do NOT produce output upon evaluation.\n"
         "\n# Precision & Truncation with Python's Decimal:\n"
-        "- Configure global execution context precision (`decimal.getcontext().prec`) to a high "
-        "default value (at least 1000) to prevent premature rounding.\n"
-        "- Truncate outputs or operations to their calculated target scales using `quantize()` "
-        "with `ROUND_DOWN` explicitly.\n"
+        "- Use Python's `decimal` module for all numeric representations to support arbitrary precision. "
+        "Configure the global context precision (`decimal.getcontext().prec`) to a high value "
+        "(at least 1000) to avoid loss of precision in intermediate operations.\n"
+        "- Arithmetic results must be truncated (not rounded) to the target scale. Ensure your "
+        "truncation logic behaves like downward rounding (such as using `ROUND_DOWN` with `quantize`).\n"
         "\n# Recursion Depth Constraints:\n"
-        "- Dynamic evaluation of recursive functions can exceed Python's call stack limit. "
-        "Increase limit via `sys.setrecursionlimit()` or use a non-recursive execution stack.\n"
+        "- The execution engine must handle deep recursion of function calls without triggering stack "
+        "overflow crashes. Consider increasing the recursion limit via `sys.setrecursionlimit()` "
+        "or using a non-recursive execution stack.\n"
         "\n# Radix & Base Constants Parsing Rules:\n"
         "- Input multi-digit constant digits greater than or equal to 'ibase' are automatically "
         "mapped to 'ibase - 1' before parsing (e.g. FFF under ibase=2 is evaluated as 111 = decimal 7).\n"
         "\n# Radix Output Formatting Precision (obase != 10):\n"
         "- When obase != 10 and scale > 0, output ceil(scale * log(10) / log(obase)) fractional digits "
         "to represent a precision of 10^scale.\n"
+        "\n# Backslash-Newline Handling (Lexical Convention):\n"
+        "- Ensure compliance with POSIX bc Lexical Convention Rule 6: The combination of a backslash "
+        "character immediately followed by a newline must have no effect other than to delimit tokens, "
+        "except within string tokens (where it remains literally as a backslash and newline sequence) "
+        "and multi-line numbers (where it is ignored).\n"
+        "- This means backslash-newline line continuations outside strings/numbers effectively join "
+        "lines together and do not act as statement-terminating NEWLINE tokens.\n"
         "\n# Scoping and Variable Lifetime:\n"
-        "- bc variables, arrays, and function parameters use dynamic scoping (shadowing via value stack). "
-        "Push old values on entry, restore them on return.\n"
+        "- Variables, arrays, and function parameters in bc use dynamic scoping. A function call "
+        "temporarily shadows outer variables of the same name. Ensure that entering a function overrides "
+        "these variables with local bindings, and exiting the function safely restores the "
+        "pre-existing outer bindings.\n"
         "\n# String Statement Output vs Expressions:\n"
-        "- Printing a literal string statement (e.g. \"hello\") must NOT output a trailing newline. "
+        '- Printing a literal string statement (e.g. "hello") must NOT output a trailing newline. '
         "Only expression statements append a newline when printed.\n"
         "\n# Output Formatting Line Wrapping:\n"
         "- Numbers printed to stdout exceeding 70 characters must be wrapped by inserting a backslash "
@@ -96,7 +118,7 @@ if __name__ == "__main__":
     if "--target-test-coverage" not in args_list:
         args_list.extend(["--target-test-coverage", "80"])
     if "--domain-tips" not in args_list:
-        args_list.extend(["--domain-tips", MATH_DOMAIN_TIPS])
+        args_list.extend(["--domain-tips", BC_DOMAIN_TIPS])
 
     try:
         final_state = main(args_list)

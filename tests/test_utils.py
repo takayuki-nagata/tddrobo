@@ -367,6 +367,30 @@ def test_genai_client_exponential_backoff_jitter():
             assert 11 <= delay2 <= 15
 
 
+def test_genai_client_daily_quota_error():
+    from google.genai.errors import ClientError
+
+    from utils import GenAIClient
+
+    with patch("utils.genai.Client"):
+        llm = GenAIClient(debug_mode=False)
+        llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
+
+        # 429 daily quota error message
+        daily_error = ClientError(429, {"error": {"message": "daily quota exceeded"}}, None)
+        llm.client.models.generate_content_stream.side_effect = daily_error
+
+        with pytest.raises(ClientError):
+            llm.call_with_retry("model", "prompt", retries=5)
+
+        # 429 spaceless perday quota error message (GenerateRequestsPerDay)
+        perday_error = ClientError(429, {"error": {"message": "GenerateRequestsPerDay exceeded"}}, None)
+        llm.client.models.generate_content_stream.side_effect = perday_error
+
+        with pytest.raises(ClientError):
+            llm.call_with_retry("model", "prompt", retries=5)
+
+
 def test_genai_client_retry_logic_json_error():
     from utils import GenAIClient
 
@@ -797,6 +821,13 @@ def test_genai_client_thinking_level():
         llm.client.models.generate_content_stream.return_value = [chunk]
         res = llm.call_with_retry("gemma-model", "prompt", thinking_level="high", retries=1)
         assert res == "thoughtful"
+
+        # Test with gemini models (which will use thinking_budget)
+        res_gemini = llm.call_with_retry("gemini-model", "prompt", thinking_level="high", retries=1)
+        assert res_gemini == "thoughtful"
+
+        res_gemini_min = llm.call_with_retry("gemini-model", "prompt", thinking_level="minimal", retries=1)
+        assert res_gemini_min == "thoughtful"
 
 
 def test_genai_client_streaming_dots_newline(capsys):
@@ -1906,7 +1937,9 @@ def test_call_llm_structured_retry():
             '{"val": 42}',
         ]
         with patch("utils.time.sleep") as mock_sleep:
-            res = call_llm_structured("dummy prompt", DummySchema, model_name="gemma-4-31b-it")
+            import config
+
+            res = call_llm_structured("dummy prompt", DummySchema, model_name=config.MODEL_PRIMARY)
             assert res.val == 42
             assert mock_reason.call_count == 2
             mock_sleep.assert_called_once()
@@ -1918,8 +1951,10 @@ def test_call_llm_structured_retry():
             import pytest
             from pydantic import ValidationError
 
+            import config
+
             with pytest.raises(ValidationError):
-                call_llm_structured("dummy prompt", DummySchema, model_name="gemma-4-31b-it")
+                call_llm_structured("dummy prompt", DummySchema, model_name=config.MODEL_PRIMARY)
             assert mock_reason.call_count == 5
             assert mock_sleep.call_count == 4
 

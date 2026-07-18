@@ -348,6 +348,8 @@ def main(args_list=None):
                         "test_syntax_error_iterations": 0,
                         "loop_detected": False,
                         "bug_report": "",
+                        "domain_tips": args.domain_tips or "",
+                        "python_tips": args.python_tips or "",
                     }
                     tdd_agent.app.update_state(config_opts, reset_data)
                     print("⚙️ Reset loop safety counters in checkpoint to ensure a clean resume.")

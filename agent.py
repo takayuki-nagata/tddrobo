@@ -207,7 +207,7 @@ def save_history_snapshot(
 def _get_dynamic_max_tokens(state: TDDState | None) -> int:
     """Calculate a dynamic max token limit based on current code size."""
     if not state:
-        return 8192
+        return config.LLM_DYNAMIC_MIN_TOKENS
 
     current_codes = [
         state.get("impl_code", ""),
@@ -218,12 +218,12 @@ def _get_dynamic_max_tokens(state: TDDState | None) -> int:
     ]
     max_char_len = max(len(c) for c in current_codes if c) if any(current_codes) else 0
 
-    # 1 token roughly equals 4 characters. Add a 4096 token safety buffer.
+    # 1 token roughly equals 4 characters. Add a safety buffer.
     estimated_tokens = max_char_len // 4
-    dynamic_limit = estimated_tokens + 4096
+    dynamic_limit = estimated_tokens + config.LLM_DYNAMIC_BUFFER_TOKENS
 
-    # Clamp between 8192 (minimum default) and 32768 (hard ceiling)
-    return min(max(8192, dynamic_limit), 32768)
+    # Clamp between minimum default and maximum ceiling limits
+    return min(max(config.LLM_DYNAMIC_MIN_TOKENS, dynamic_limit), config.LLM_DYNAMIC_MAX_TOKENS)
 
 
 def _call_llm_structured_wrapper(
@@ -240,8 +240,29 @@ def _call_llm_text_wrapper(prompt: str, model_name: str = config.MODEL_PRIMARY, 
     return call_llm_text(prompt, model_name=model_name, max_tokens=max_tokens)
 
 
+def _call_llm_with_reasoning_wrapper(
+    prompt: str,
+    response_schema: Any = None,
+    tools: list[Any] | None = None,
+    thinking_level: str | None = None,
+    temperature: float = 0.0,
+    **kwargs,
+) -> str:
+    state = getattr(_thread_local, "current_state", None)
+    max_tokens = _get_dynamic_max_tokens(state)
+    return call_llm_with_reasoning(
+        prompt,
+        response_schema=response_schema,
+        tools=tools,
+        thinking_level=thinking_level,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+
+
 _call_llm_structured = _call_llm_structured_wrapper
 _call_llm_text = _call_llm_text_wrapper
+_call_llm_with_reasoning = _call_llm_with_reasoning_wrapper
 
 
 def _cleanup_history_on_rollback(state: TDDState):
@@ -433,6 +454,7 @@ def _execute_tests_helper(test_file: str | None, state: TDDState) -> dict:
             "stagnant_iterations": 0,
             "iterations": 0,
             "test_plan_iterations": 0,
+            "audit_loop_count": 0,
             "failed_methods": list(failed_methods),
             "failed_files": list(failed_files),
             "failed_tests_detail": failed_tests_detail,
@@ -1104,8 +1126,16 @@ def _run_early_oracle_verification(test_plan_json: str) -> list[dict]:
                 # by joining lines with '\n', while keeping single-line fallback compatible.
                 last_oracle_val = "\n".join(oracle_lines) if oracle_lines else ""
 
-                if "Error" not in oracle_result and "Exception" not in oracle_result:
-                    if last_oracle_val != expected_val:
+                expects_error = any(w in expected_val.lower() for w in ["error", "exception", "syntax", "fail"])
+                oracle_has_error = "error" in oracle_result.lower() or "exception" in oracle_result.lower()
+                is_context_missing = "undefined" in oracle_result.lower()
+
+                if oracle_has_error:
+                    if is_context_missing:
+                        continue
+                    elif expects_error:
+                        continue
+                    else:
                         mismatches.append(
                             {
                                 "test_case": tc,
@@ -1114,6 +1144,26 @@ def _run_early_oracle_verification(test_plan_json: str) -> list[dict]:
                                 "oracle_val": last_oracle_val,
                             }
                         )
+                else:
+                    if expects_error:
+                        mismatches.append(
+                            {
+                                "test_case": tc,
+                                "expr": expr_cleaned,
+                                "expected_val": expected_val,
+                                "oracle_val": last_oracle_val,
+                            }
+                        )
+                    else:
+                        if last_oracle_val != expected_val:
+                            mismatches.append(
+                                {
+                                    "test_case": tc,
+                                    "expr": expr_cleaned,
+                                    "expected_val": expected_val,
+                                    "oracle_val": last_oracle_val,
+                                }
+                            )
             except Exception:
                 pass
 
@@ -2148,7 +2198,7 @@ def _implement_logic_helper(state: TDDState, phase: str) -> dict:
     )
 
     temp = 0.5 if state.get("loop_detected") else 0.0
-    response = call_llm_with_reasoning(prompt, thinking_level="MINIMAL", temperature=temp)
+    response = _call_llm_with_reasoning(prompt, thinking_level="MINIMAL", temperature=temp)
 
     # 4. Apply changes and save
     if existing_impl and not design_updated:

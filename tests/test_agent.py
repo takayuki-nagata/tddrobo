@@ -875,6 +875,7 @@ def test_agent_additional_coverage(tmp_path, monkeypatch):
         assert len(res["test_output"]) < 9000
         assert "TRUNCATED" in res["test_output"]
         assert res["success"] is True
+        assert res["audit_loop_count"] == 0
         mock_popen.assert_called_once()
         passed_env = mock_popen.call_args[1].get("env", {})
         assert passed_env.get("TDD_ROBO_DEBUG") == config.TDD_ROBO_DEBUG
@@ -3004,6 +3005,84 @@ def test_early_oracle_verification_discrepancy(monkeypatch):
         res_invalid = review_unit_test_plan(state_invalid_json)
         assert res_invalid["test_plan_review_decision"] == "continue"
 
+    # 7. Test standalone relational comparison (Expected '1' but oracle returns POSIX comparison Error)
+    state_rel_err = TDDState(
+        goal="bc math calculator",
+        spec_content="Calculate simple math",
+        requirements=[{"id": "REQ001", "description": "Addition"}],
+        current_req_index=0,
+        unit_test_plan=(
+            '{"test_cases": [{"action": "execute 10 > 5", "expected_outcome": "1", '
+            '"oracle_expression": "10 > 5", "oracle_expected": "1"}]}'
+        ),
+        test_plan="1. Action: execute 10 > 5 | Expected: 1",
+    )
+    monkeypatch.setattr(
+        config, "ORACLE_VERIFIER", lambda expr, expected=None: "Error: (standard_in) 2: Error: comparison in expression"
+    )
+    with patch("agent._call_llm_structured") as mock_call:
+        mock_call.side_effect = [mock_report, mock_judgment]
+        res_rel = review_unit_test_plan(state_rel_err)
+        assert res_rel["test_plan_review_decision"] == "update_design_for_req"
+        assert "discrepancies" in res_rel["design_review_feedback"]
+
+    # 8. Test error expected but oracle returns normal value
+    state_err_expected = TDDState(
+        goal="bc math calculator",
+        spec_content="Calculate simple math",
+        requirements=[{"id": "REQ001", "description": "Addition"}],
+        current_req_index=0,
+        unit_test_plan=(
+            '{"test_cases": [{"action": "execute 10 > 5", "expected_outcome": "SyntaxError", '
+            '"oracle_expression": "10 > 5", "oracle_expected": "SyntaxError"}]}'
+        ),
+        test_plan="1. Action: execute 10 > 5 | Expected: SyntaxError",
+    )
+    monkeypatch.setattr(config, "ORACLE_VERIFIER", lambda expr, expected=None: "1")
+    with patch("agent._call_llm_structured") as mock_call:
+        mock_call.side_effect = [mock_report, mock_judgment]
+        res_err_exp = review_unit_test_plan(state_err_expected)
+        assert res_err_exp["test_plan_review_decision"] == "update_design_for_req"
+        assert "discrepancies" in res_err_exp["design_review_feedback"]
+
+    # 9. Test error expected and oracle returns error (valid negative test case)
+    state_err_valid = TDDState(
+        goal="bc math calculator",
+        spec_content="Calculate simple math",
+        requirements=[{"id": "REQ001", "description": "Addition"}],
+        current_req_index=0,
+        unit_test_plan=(
+            '{"test_cases": [{"action": "execute 10 > 5", "expected_outcome": "SyntaxError", '
+            '"oracle_expression": "10 > 5", "oracle_expected": "SyntaxError"}]}'
+        ),
+        test_plan="1. Action: execute 10 > 5 | Expected: SyntaxError",
+    )
+    monkeypatch.setattr(
+        config, "ORACLE_VERIFIER", lambda expr, expected=None: "Error: (standard_in) 2: Error: comparison in expression"
+    )
+    with patch("agent._call_llm_structured", return_value=mock_report):
+        res_err_val = review_unit_test_plan(state_err_valid)
+        assert res_err_val["test_plan_review_decision"] == "continue"
+
+    # 10. Test normal expected with runtime context error - should pass via safety valve
+    state_runtime_err = TDDState(
+        goal="bc math calculator",
+        spec_content="Calculate simple math",
+        requirements=[{"id": "REQ001", "description": "Addition"}],
+        current_req_index=0,
+        unit_test_plan=(
+            '{"test_cases": [{"action": "execute f(5)", "expected_outcome": "1", '
+            '"oracle_expression": "1 + 2", "oracle_expected": "1"}]}'
+        ),
+        test_plan="1. Action: execute f(5) | Expected: 1",
+    )
+    monkeypatch.setattr(
+        config, "ORACLE_VERIFIER", lambda expr, expected=None: "Error: runtime error: undefined function: f"
+    )
+    with patch("agent._call_llm_structured", return_value=mock_report):
+        res_runtime = review_unit_test_plan(state_runtime_err)
+        assert res_runtime["test_plan_review_decision"] == "continue"
+
 
 def test_regression_failure_policy_logic():
     from agent import (
@@ -3303,6 +3382,40 @@ def test_multiline_disc():
 
     # 6. Test _get_dynamic_max_tokens with None state
     assert agent._get_dynamic_max_tokens(None) == 8192
+
+    # 7. Test _get_dynamic_max_tokens with active state scaling
+    from schema import TDDState
+
+    state_large = TDDState(
+        impl_code="A" * 150000,  # 150,000 chars / 4 = 37,500 estimated tokens. Buffer is 4096.
+    )
+    # Expected dynamic token count: 37500 + 4096 = 41596
+    assert agent._get_dynamic_max_tokens(state_large) == 41596
+
+    # Test dynamic max tokens limits clamping to the configuration maximum
+    state_huge = TDDState(
+        impl_code="A" * 1200000,  # 1,200,000 chars / 4 = 300,000 estimated tokens. Clamps to max 262144.
+    )
+    assert agent._get_dynamic_max_tokens(state_huge) == 262144
+
+    # 8. Test _call_llm_with_reasoning wrapper routes max_tokens correctly
+    with patch("agent.call_llm_with_reasoning") as mock_reasoning:
+        mock_reasoning.return_value = "mock response"
+        # Mock thread local state
+        agent._thread_local.current_state = state_large
+        try:
+            res = agent._call_llm_with_reasoning("test prompt", thinking_level="MINIMAL")
+            assert res == "mock response"
+            mock_reasoning.assert_called_once_with(
+                "test prompt",
+                response_schema=None,
+                tools=None,
+                thinking_level="MINIMAL",
+                temperature=0.0,
+                max_tokens=41596,
+            )
+        finally:
+            agent._thread_local.current_state = None
 
 
 def test_robust_self_correction_rollback_improvements(tmp_path, monkeypatch):
