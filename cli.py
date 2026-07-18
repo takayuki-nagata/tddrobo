@@ -41,10 +41,29 @@ def main(args_list=None):
     parser.add_argument(
         "--target-test-coverage", type=int, default=config.TARGET_TEST_COVERAGE, help="Target test coverage"
     )
+    parser.add_argument(
+        "--target-design-quality",
+        type=int,
+        default=config.TARGET_DESIGN_QUALITY,
+        help="Target design quality threshold percentage (0-100)",
+    )
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose log outputs")
     parser.add_argument("--session-id", type=str, default=config.SESSION_ID, help="Session ID / subdirectory name")
     parser.add_argument("--domain-tips", type=str, default=config.DOMAIN_TIPS, help="Implementation domain tips text")
     parser.add_argument("--domain-tips-file", type=str, default="", help="Path to file containing domain tips text")
+    parser.add_argument(
+        "--python-tips", type=str, default=config.DEFAULT_PYTHON_TIPS, help="Python environment tips text"
+    )
+    parser.add_argument(
+        "--python-tips-file", type=str, default="", help="Path to file containing python environment tips text"
+    )
+    parser.add_argument(
+        "--regression-failure-policy",
+        type=str,
+        choices=["rollback", "halt"],
+        default="rollback",
+        help="Policy on regression failure: rollback or halt",
+    )
     parser.add_argument(
         "--draw-graph",
         action="store_true",
@@ -58,6 +77,13 @@ def main(args_list=None):
                 args.domain_tips = f.read()
         except Exception as e:
             print(f"⚠️ Failed to read domain tips file {args.domain_tips_file}: {e}")
+
+    if args.python_tips_file:
+        try:
+            with open(args.python_tips_file, "r", encoding="utf-8") as f:
+                args.python_tips = f.read()
+        except Exception as e:
+            print(f"⚠️ Failed to read python tips file {args.python_tips_file}: {e}")
 
     if args.verbose:
         config.VERBOSE = True
@@ -170,6 +196,7 @@ def main(args_list=None):
         "TARGET_TEST_PLAN_COVERAGE": args.target_test_plan_coverage,
         "TARGET_TEST_COVERAGE": args.target_test_coverage,
         "DOMAIN_TIPS": args.domain_tips,
+        "PYTHON_TIPS": args.python_tips,
     }
 
     if should_resume:
@@ -213,6 +240,7 @@ def main(args_list=None):
                 if os.path.exists(old_spec_path):
                     shutil.copy2(old_spec_path, os.path.join(artifacts_dir, "specification.txt"))
             else:
+                print(f"[TDD Robo] 🧹 Cleaning up existing session artifacts in '{artifacts_dir}'...")
                 for entry_name in os.listdir(artifacts_dir):
                     if entry_name not in ("specification.txt", ".session.lock"):
                         file_path = os.path.join(artifacts_dir, entry_name)
@@ -236,7 +264,13 @@ def main(args_list=None):
         "max_test_iterations": args.max_test_iterations,
         "target_test_plan_coverage": args.target_test_plan_coverage,
         "target_test_coverage": args.target_test_coverage,
+        "target_design_quality": args.target_design_quality,
         "domain_tips": args.domain_tips or "",
+        "python_tips": args.python_tips or "",
+        "design_iterations": 0,
+        "syntax_error_iterations": 0,
+        "test_syntax_error_iterations": 0,
+        "regression_failure_policy": args.regression_failure_policy,
     }
 
     config_opts = {"configurable": {"thread_id": config.SESSION_ID, "recursion_limit": 150}}
@@ -300,6 +334,23 @@ def main(args_list=None):
         mlflow.log_param("resumed", should_resume)
 
         if should_resume:
+            # Reset loop detection counters to prevent immediate rollback on resume
+            try:
+                state_snapshot = tdd_agent.app.get_state(config_opts)
+                if state_snapshot and state_snapshot.values:
+                    reset_data = {
+                        "iterations": 0,
+                        "stagnant_iterations": 0,
+                        "syntax_error_iterations": 0,
+                        "test_syntax_error_iterations": 0,
+                        "loop_detected": False,
+                        "bug_report": "",
+                    }
+                    tdd_agent.app.update_state(config_opts, reset_data)
+                    print("⚙️ Reset loop safety counters in checkpoint to ensure a clean resume.")
+            except Exception as e:
+                print(f"Warning: Could not reset safety counters on resume: {e}")
+
             final_state = tdd_agent.invoke(None, config=config_opts)
         else:
             final_state = tdd_agent.invoke(initial_state, config=config_opts)

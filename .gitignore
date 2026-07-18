@@ -25,3 +25,6 @@ mlruns/
 # Coverage
 .coverage
 .coverage.*
+
+# Scratch and temporary folders
+scratch/

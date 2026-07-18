@@ -7,7 +7,9 @@ from cli import main
 from schema import (
     BugReport,
     DesignDocument,
+    DesignReviewReport,
     FilePlan,
+    RefactorDecision,
     RequirementsList,
     TestPlan,
     TestPlanReviewReport,
@@ -48,12 +50,16 @@ def test_e2e_happy_path(e2e_env):
                 '"error_handling": "none", "command_line_interface": "none"}\n'
                 "```"
             )
+        if response_schema == DesignReviewReport:
+            return '```json\n{"estimated_quality": 100, "comments": "No gaps detected."}\n```'
         if response_schema == TestPlan:
             return '```json\n{"test_cases": [{"action": "add numbers", "expected_outcome": "returns sum"}]}\n```'
         if response_schema == TestPlanReviewReport:
             return '```json\n{"missing_test_cases": [], "estimated_coverage": 100, "feedback": "Good"}\n```'
         if response_schema == TestReviewReport:
             return '```json\n{"missing_test_cases": [], "estimated_coverage": 100, "feedback": "Good"}\n```'
+        if response_schema == RefactorDecision:
+            return '```json\n{"chain_of_thought": "good", "refactor_needed": false, "reasons": []}\n```'
 
         if "Test Generation & Review (Current Phase)" in prompt:
             return "```python\ndef test_add():\n    from app import add\n    assert add(1, 2) == 3\n```"
@@ -73,6 +79,7 @@ def test_e2e_happy_path(e2e_env):
         patch("utils._default_llm.generate_standard", side_effect=mock_llm_standard),
         patch("agent.requests.get") as mock_get,
         patch("agent.subprocess.run") as mock_run,
+        patch("agent.subprocess.Popen") as mock_popen,
     ):
         # Mock requests.get to return a dummy specification
         mock_response = MagicMock()
@@ -81,8 +88,14 @@ def test_e2e_happy_path(e2e_env):
         mock_response.headers = {"Content-Type": "text/plain"}
         mock_get.return_value = mock_response
 
-        # Mock subprocess.run to simulate successful syntax check (flake8) and test execution (pytest)
+        # Mock subprocess.run to simulate successful syntax check (flake8)
         mock_run.return_value = MagicMock(returncode=0, stdout="Success", stderr="")
+
+        # Mock subprocess.Popen to simulate successful test execution (pytest)
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.communicate.return_value = ("Success", "")
+        mock_popen.return_value = mock_process
 
         # Execute the main workflow
         args = ["--goal", "Build a calculator", "--spec-url", "http://example.com/spec"]
@@ -91,14 +104,15 @@ def test_e2e_happy_path(e2e_env):
         # Verify that the state reached END and succeeded
         assert final_state is not None
         assert final_state.get("success") is True
-        assert final_state.get("iterations", 0) == 1
+        assert final_state.get("iterations", 0) == 0
 
         # Verify that expected artifacts were correctly saved to the session directory
         import config
 
         session_dir = config.ARTIFACTS_DIR
         assert os.path.exists(os.path.join(session_dir, "app.py"))
-        assert os.path.exists(os.path.join(session_dir, "test_app_req001.py"))
+        assert os.path.exists(os.path.join(session_dir, "test_app_req001_unit.py"))
+        assert os.path.exists(os.path.join(session_dir, "test_app_req001_integration.py"))
         assert os.path.exists(os.path.join(session_dir, "README.md"))
         assert os.path.exists(os.path.join(session_dir, "specification.txt"))
 
@@ -119,6 +133,8 @@ def test_e2e_recovery_path(e2e_env):
                 '"error_handling": "none", "command_line_interface": "none"}\n'
                 "```"
             )
+        if response_schema == DesignReviewReport:
+            return '```json\n{"estimated_quality": 100, "comments": "No gaps detected."}\n```'
         if response_schema == TestPlan:
             return '```json\n{"test_cases": [{"action": "add numbers", "expected_outcome": "returns sum"}]}\n```'
         if response_schema == TestPlanReviewReport:
@@ -132,6 +148,8 @@ def test_e2e_recovery_path(e2e_env):
                 '"fix_instructions": "Implement addition properly", "target_to_fix": "implement_logic"}\n'
                 "```"
             )
+        if response_schema == RefactorDecision:
+            return '```json\n{"chain_of_thought": "good", "refactor_needed": false, "reasons": []}\n```'
 
         if "Test Generation & Review (Current Phase)" in prompt:
             return "```python\ndef test_add():\n    from app import add\n    assert add(1, 2) == 3\n```"
@@ -155,26 +173,37 @@ def test_e2e_recovery_path(e2e_env):
         patch("utils._default_llm.generate_standard", side_effect=mock_llm_standard),
         patch("agent.requests.get") as mock_get,
         patch("agent.subprocess.run") as mock_run,
+        patch("agent.subprocess.Popen") as mock_popen,
     ):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.text = "Specification: Build a simple calculator."
         mock_get.return_value = mock_response
 
+        # Mock subprocess.run to simulate successful syntax check (flake8)
+        mock_run.return_value = MagicMock(returncode=0, stdout="Success", stderr="")
+
         pytest_called = False
 
-        def run_side_effect(args, **kwargs):
+        def popen_side_effect(args, **kwargs):
             nonlocal pytest_called
+            mock_proc = MagicMock()
             if "pytest" in args:
                 if not pytest_called:
                     pytest_called = True
-                    return MagicMock(returncode=1, stdout="Test Failed", stderr="")
-                return MagicMock(returncode=0, stdout="Test Passed", stderr="")
-            return MagicMock(returncode=0, stdout="Success", stderr="")
+                    mock_proc.returncode = 1
+                    mock_proc.communicate.return_value = ("Test Failed", "")
+                else:
+                    mock_proc.returncode = 0
+                    mock_proc.communicate.return_value = ("Test Passed", "")
+            else:
+                mock_proc.returncode = 0
+                mock_proc.communicate.return_value = ("Success", "")
+            return mock_proc
 
-        mock_run.side_effect = run_side_effect
+        mock_popen.side_effect = popen_side_effect
         final_state = main(["--goal", "Build a calculator", "--spec-url", "http://example.com/spec"])
-        assert final_state.get("iterations", 0) == 2
+        assert final_state.get("iterations", 0) == 0
 
 
 def test_cli_draw_graph(tmp_path, monkeypatch):

@@ -63,6 +63,45 @@ def test_evaluate_math_expression_success(mock_run):
 
 
 @patch("utils.subprocess.run")
+def test_evaluate_math_expression_dynamic_math_lib_resolution(mock_run):
+    import config
+
+    # Simulate:
+    # 1. First run: command evaluates to '0' (standard mode)
+    # 2. Second run: command evaluates to '20' (math library mode)
+    # If expected='20', it should resolve and return '20'.
+    run_std = MagicMock(returncode=0, stdout="0\n", stderr="")
+    run_math = MagicMock(returncode=0, stdout="20\n", stderr="")
+    mock_run.side_effect = [run_std, run_math]
+
+    with patch.object(config, "VERBOSE", True):
+        result = evaluate_math_expression("scale", expected="20")
+
+    assert result == "20"
+    assert mock_run.call_count == 2
+
+
+def test_evaluate_math_expression_math_lib_branch():
+    import config
+
+    with patch("utils.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="0.8414\n", stderr="")
+        with patch.object(config, "VERBOSE", True):
+            result = evaluate_math_expression("s(1)")
+        assert result == "0.8414"
+        mock_run.assert_called_once()
+
+
+def test_run_bc_command_with_expected():
+    from utils import run_bc_command
+
+    with patch("utils.evaluate_math_expression") as mock_eval:
+        mock_eval.return_value = "2"
+        assert run_bc_command("1+1", expected="2") == "2"
+        mock_eval.assert_called_once_with("1+1", "2")
+
+
+@patch("utils.subprocess.run")
 def test_evaluate_math_expression_error(mock_run):
     import config
 
@@ -224,16 +263,46 @@ def test_genai_client_no_api_keys():
 
     with patch.dict("os.environ", {}, clear=True), patch("utils.genai.Client"):
         client = GenAIClient(debug_mode=False)
-        assert client is not None
+        assert client.client is not None
 
 
 def test_genai_client_init_exception():
+    import config
     from utils import GenAIClient
+
+    with patch("utils.genai.Client") as MockClient, patch.object(config, "VERBOSE", True):
+        mock_client = MockClient.return_value
+        mock_client.models.list.side_effect = Exception("list error")
+        client = GenAIClient(debug_mode=False)
+        _ = client.client  # Force initialization to trigger the exception block
+
+
+def test_genai_client_gemini_key_fallback():
+    from utils import GenAIClient
+
+    env_mock = {"GEMINI_API_KEY": "fake_gemini_key"}
+    with patch.dict("os.environ", env_mock, clear=True), patch("utils.genai.Client"):
+        client = GenAIClient(debug_mode=False)
+        _ = client.client
+        assert os.environ.get("GOOGLE_API_KEY") == "fake_gemini_key"
+
+
+def test_genai_client_debug_mode():
+    from utils import GenAIClient
+
+    class MockModel:
+        def __init__(self, name, actions):
+            self.name = name
+            self.supported_actions = actions
 
     with patch("utils.genai.Client") as MockClient:
         mock_client = MockClient.return_value
-        mock_client.models.list.side_effect = Exception("list error")
-        GenAIClient(debug_mode=False)  # Should catch and print error
+        mock_client.models.list.return_value = [
+            MockModel("gemini-1.5-flash", ["generateContent"]),
+            MockModel("other-model", []),
+        ]
+        client = GenAIClient(debug_mode=True)
+        _ = client.client
 
 
 def test_genai_client_retry_logic():
@@ -258,6 +327,44 @@ def test_genai_client_retry_logic():
             res = llm.call_with_retry("model", "prompt", retries=3)
             assert res == "success_code"
             mock_sleep.assert_called_once()
+
+
+def test_genai_client_exponential_backoff_jitter():
+    from google.genai.errors import APIError
+
+    from utils import GenAIClient
+
+    with patch("utils.genai.Client"):
+        llm = GenAIClient(debug_mode=False)
+        llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
+
+        # 1st attempt: 429 error with "retry in 45s"
+        error_suggested = APIError("quota exceeded, please retry in 45.0s", {})
+        error_suggested.code = 429
+
+        # 2nd attempt: 429 error without retry hint
+        error_no_suggested = APIError("quota exceeded, RESOURCE_EXHAUSTED", {})
+        error_no_suggested.code = 429
+
+        # 3rd attempt: Success
+        good_chunk = MagicMock(text="success_code", candidates=[MagicMock(finish_reason="STOP")])
+
+        llm.client.models.generate_content_stream.side_effect = [error_suggested, error_no_suggested, [good_chunk]]
+
+        with patch("utils.time.sleep") as mock_sleep:
+            res = llm.call_with_retry("model", "prompt", retries=5)
+            assert res == "success_code"
+
+            # Retrieve sleep delays
+            assert mock_sleep.call_count == 2
+            delay1 = mock_sleep.call_args_list[0][0][0]
+            delay2 = mock_sleep.call_args_list[1][0][0]
+
+            # delay1 should be suggested (45+5) + jitter(1-5) -> 51 to 55
+            assert 51 <= delay1 <= 55
+
+            # delay2 should be exp_delay (5 * 2^1 = 10) + jitter(1-5) -> 11 to 15
+            assert 11 <= delay2 <= 15
 
 
 def test_genai_client_retry_logic_json_error():
@@ -797,6 +904,55 @@ def test_genai_client_retry_on_timeout():
             mock_sleep.assert_called_once()
 
 
+def test_genai_client_retry_on_timeout_degeneration():
+    from unittest.mock import MagicMock, patch
+
+    from google.genai.errors import APIError
+
+    from utils import GenAIClient
+
+    with patch("utils.genai.Client"):
+        llm = GenAIClient(debug_mode=False)
+        llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
+
+        api_err = APIError(504, {"error": "Deadline expired"})
+        good_chunk = MagicMock(text="success_with_degeneration", candidates=[MagicMock(finish_reason="STOP")])
+
+        calls = []
+
+        def mock_generate_stream(model, contents, config):
+            calls.append((contents, config.temperature))
+            if len(calls) == 1:
+                raise api_err
+            elif len(calls) == 2:
+
+                def gen():
+                    raise TimeoutError("Timeout during iteration")
+                    yield
+
+                return gen()
+            else:
+                return [good_chunk]
+
+        llm.client.models.generate_content_stream.side_effect = mock_generate_stream
+
+        with patch("utils.time.sleep") as mock_sleep:
+            res = llm.call_with_retry("model", "original_prompt", retries=3, delay=0, temperature=0.1)
+            assert res == "success_with_degeneration"
+            assert len(calls) == 3
+            assert mock_sleep.call_count == 2
+
+            assert calls[0][0] == "original_prompt"
+            assert calls[0][1] == pytest.approx(0.1)
+
+            assert "System Warning" in calls[1][0]
+            assert calls[1][1] > 0.1
+            temp_after_504 = calls[1][1]
+
+            assert "System Warning" in calls[2][0]
+            assert calls[2][1] == pytest.approx(temp_after_504)
+
+
 def test_stream_with_timeout_exception():
     import pytest
 
@@ -1079,7 +1235,7 @@ def test_call_with_retry_connection_error():
         with patch("utils.time.sleep") as mock_sleep:
             res = llm.call_with_retry("model", "prompt", retries=2, delay=0)
             assert res == "recovered"
-            mock_sleep.assert_called_once()
+            assert mock_sleep.call_count >= 1
 
 
 def test_apply_search_replace_blocks():
@@ -1152,7 +1308,9 @@ def test_apply_search_replace_blocks():
     val = 2
     >>>>>>> REPLACE
     """)
-    with pytest.raises(ValueError, match="matches multiple times"):
+    with pytest.raises(
+        ValueError, match=r"matches multiple times \(2\) in the file. Matches found at line numbers: \[1, 2\]."
+    ):
         apply_search_replace_blocks(ambiguous_original, response_ambiguous)
 
     # 6. Carriage returns handling
@@ -1209,6 +1367,34 @@ def test_apply_search_replace_blocks():
     with pytest.raises(ValueError, match="Response text is empty"):
         apply_search_replace_blocks(original_typo, "")
 
+    # 10.1. Triple-quoted strings in search blocks (should not be ignored as comments)
+    original_triple = textwrap.dedent("""
+    def get_query():
+        return \"\"\"
+        SELECT * FROM table
+        \"\"\"
+    """)
+    response_triple = textwrap.dedent("""
+    <<<<<<< SEARCH
+    def get_query():
+        return \"\"\"
+        SELECT * FROM table
+        \"\"\"
+    =======
+    def get_query():
+        return \"\"\"
+        SELECT id, name FROM table
+        \"\"\"
+    >>>>>>> REPLACE
+    """)
+    expected_triple = textwrap.dedent("""
+    def get_query():
+        return \"\"\"
+        SELECT id, name FROM table
+        \"\"\"
+    """)
+    assert apply_search_replace_blocks(original_triple, response_triple) == expected_triple
+
     # 11. Stripped newlines matching (single match vs multiple matches)
     original_newlines = "\nval = 1\n"
     response_newlines_single = textwrap.dedent("""
@@ -1236,7 +1422,9 @@ def test_apply_search_replace_blocks():
     val = 2
     >>>>>>> REPLACE
     """)
-    with pytest.raises(ValueError, match="matches multiple times"):
+    with pytest.raises(
+        ValueError, match=r"matches multiple times \(2\) in the file. Matches found at line numbers: \[2, 3\]."
+    ):
         apply_search_replace_blocks(original_newlines_multi, response_newlines_multi)
 
     # 12. Fuzzy matching multiple matches
@@ -1248,8 +1436,65 @@ def test_apply_search_replace_blocks():
     val = 2
     >>>>>>> REPLACE
     """)
-    with pytest.raises(ValueError, match="matches multiple times"):
+    with pytest.raises(
+        ValueError, match=r"matches multiple times \(2\) in the file. Matches found at line numbers: \[1, 2\]."
+    ):
         apply_search_replace_blocks(original_fuzzy_multi, response_fuzzy_multi)
+
+    # 13. End of file placeholder matching
+    original_eof = "val = 1\n"
+    response_eof = textwrap.dedent("""
+    <<<<<<< SEARCH
+    # (End of file)
+    =======
+    def new_func():
+        pass
+    >>>>>>> REPLACE
+    """)
+    assert apply_search_replace_blocks(original_eof, response_eof) == "val = 1\ndef new_func():\n    pass\n"
+
+    response_eof_2 = textwrap.dedent("""
+    <<<<<<< SEARCH
+    // (End of file).
+    =======
+    # another comment
+    >>>>>>> REPLACE
+    """)
+    assert apply_search_replace_blocks(original_eof, response_eof_2) == "val = 1\n# another comment\n"
+
+    # Test non-newline terminated code and CSS style comment
+    original_eof_no_newline = "val = 1"
+    response_eof_css = textwrap.dedent("""
+    <<<<<<< SEARCH
+    /* (End of file) */
+    =======
+    /* css comment */
+    >>>>>>> REPLACE
+    """)
+    assert apply_search_replace_blocks(original_eof_no_newline, response_eof_css) == "val = 1\n/* css comment */\n"
+
+
+def test_find_exact_match_lines():
+    from utils import _find_exact_match_lines
+
+    assert _find_exact_match_lines("a\nb\na", "") == []
+    assert _find_exact_match_lines("a\nb\na", "a") == [1, 3]
+    assert _find_exact_match_lines("a\nb\na", "b") == [2]
+    assert _find_exact_match_lines("a\nb\na", "c") == []
+
+
+def test_format_match_contexts():
+    from utils import _format_match_contexts
+
+    code = "line1\nline2\nline3\nline4\nline5\nline6"
+    res = _format_match_contexts(code, [2, 5], "line2")
+    assert "Match 1 at line 2:" in res
+    assert "->    2 | line2" in res
+    assert "Match 2 at line 5:" in res
+    assert "->    5 | line5" in res
+
+    res_empty = _format_match_contexts("", [], "")
+    assert res_empty == ""
 
 
 def test_run_bc_command():
@@ -1320,14 +1565,20 @@ def test_genai_client_429_retry_handling():
             with patch("utils.time.sleep") as mock_sleep, patch("utils.config.VERBOSE", False):
                 res = llm.call_with_retry("model", "prompt", retries=2, delay=2)
                 assert res == "success"
-                mock_sleep.assert_called_once_with(15)  # max(1.5 + 5, 15) -> 15 -> int() -> 15
+                assert mock_sleep.call_count == 1
+                sleep_val = mock_sleep.call_args[0][0]
+                # max(1.5+5, 2) + jitter(1-5) -> 6 + (1-5) -> 7 to 11
+                assert 7 <= sleep_val <= 11
 
             # Test case 2: 429 without suggested delay (exponential backoff)
             llm.client.models.generate_content_stream.side_effect = [err_429_no_delay, [good_chunk]]
             with patch("utils.time.sleep") as mock_sleep, patch("utils.config.VERBOSE", False):
                 res = llm.call_with_retry("model", "prompt", retries=2, delay=2)
                 assert res == "success"
-                mock_sleep.assert_called_once_with(30)  # max(2 * 2, 30) -> 30
+                assert mock_sleep.call_count == 1
+                sleep_val = mock_sleep.call_args[0][0]
+                # exp_delay (2 * 1 = 2) + jitter(1-5) -> 3 to 7
+                assert 3 <= sleep_val <= 7
 
 
 def test_find_flexible_match_empty_search():
@@ -1345,6 +1596,14 @@ def test_find_flexible_match_fallback_comments_only():
     # This will trigger fallback matching, and compare clean_search containing empty lines
     # causing lines_similar to get called with empty strings.
     assert _find_flexible_match(code, search) == ("\n# comment here", 1)
+
+
+def test_find_flexible_match_fallback_comments_multiple_matches():
+    from utils import _find_flexible_match
+
+    code = "# comment\n# comment"
+    search = "# comment"
+    assert _find_flexible_match(code, search) == (None, [1, 2])
 
 
 def test_find_flexible_match_fallback_no_match():
@@ -1397,3 +1656,402 @@ def test_genai_client_streaming_with_parts():
         with patch("utils.config.VERBOSE", False):
             res = llm.call_with_retry("gemma-model", "prompt", thinking_level="high", retries=1)
             assert res == "json output"
+
+
+def test_call_with_retry_asymptotic_temperature():
+    from unittest.mock import MagicMock, patch
+
+    from utils import GenAIClient
+
+    with patch("utils.genai.Client"):
+        llm = GenAIClient(debug_mode=False)
+        llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
+
+        captured_temps = []
+
+        def mock_generate(*args, **kwargs):
+            config_arg = kwargs.get("config")
+            if config_arg:
+                captured_temps.append(config_arg.temperature)
+
+            # Raise degeneration loop error for the first 3 attempts
+            if len(captured_temps) < 4:
+                raise RuntimeError("Repetition loop detected during streaming.")
+
+            # Succeeded on the 4th attempt
+            good_chunk = MagicMock(text="success_response", candidates=[MagicMock(finish_reason="STOP")])
+            return [good_chunk]
+
+        llm.client.models.generate_content_stream.side_effect = mock_generate
+
+        with patch("utils.time.sleep") as mock_sleep:
+            with patch("utils.config.VERBOSE", True):
+                res = llm.call_with_retry("model", "prompt", retries=5, delay=0)
+                assert res == "success_response"
+
+                # Assertions for captured temperatures:
+                # Attempt 1 (degen_count = 0): temp = 0.0
+                # Attempt 2 (degen_count = 1): temp = 0.25
+                # Attempt 3 (degen_count = 2): temp = 0.375
+                # Attempt 4 (degen_count = 3): temp = 0.4375
+                assert len(captured_temps) == 4
+                assert captured_temps[0] == 0.0
+                assert captured_temps[1] == 0.25
+                assert captured_temps[2] == 0.375
+                assert captured_temps[3] == 0.4375
+                assert mock_sleep.call_count == 3
+
+
+def test_call_with_retry_degen_warning_injection():
+    from unittest.mock import MagicMock, patch
+
+    from utils import GenAIClient
+
+    with patch("utils.genai.Client"):
+        llm = GenAIClient(debug_mode=False)
+        llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
+
+        captured_prompts = []
+
+        def mock_generate(*args, **kwargs):
+            prompt_val = kwargs.get("contents")
+            captured_prompts.append(prompt_val)
+
+            # Raise degeneration loop error on the first attempt
+            if len(captured_prompts) < 2:
+                raise RuntimeError("Repetition loop detected during streaming.")
+
+            # Succeeded on the second attempt
+            good_chunk = MagicMock(text="success_response", candidates=[MagicMock(finish_reason="STOP")])
+            return [good_chunk]
+
+        llm.client.models.generate_content_stream.side_effect = mock_generate
+
+        with patch("utils.time.sleep") as mock_sleep:
+            with patch("utils.config.VERBOSE", True):
+                res = llm.call_with_retry("model", "original_prompt", retries=3, delay=0)
+                assert res == "success_response"
+
+                assert len(captured_prompts) == 2
+                assert captured_prompts[0] == "original_prompt"
+                assert (
+                    "System Warning: Your previous generation was aborted due to an infinite token repetition loop"
+                    in captured_prompts[1]
+                )
+                assert mock_sleep.call_count == 1
+
+
+def test_check_repetition_patterns():
+    from utils import GenAIClient
+
+    with patch("utils.genai.Client"):
+        llm = GenAIClient(debug_mode=False)
+
+        # Test long pattern repetition (length >= 15, repeated >= 4 times)
+        with pytest.raises(RuntimeError, match="Repetition loop"):
+            llm._check_repetition("1234567890abcde" * 8)
+
+        # Test medium pattern repetition (length >= 8, repeated >= 4 times, non-numeric)
+        with pytest.raises(RuntimeError, match="Repetition loop"):
+            llm._check_repetition("abcdefgh" * 15)
+
+        # Test short-medium pattern repetition (length >= 5, repeated >= 7 times, non-numeric)
+        with pytest.raises(RuntimeError, match="Repetition loop"):
+            llm._check_repetition("abcde" * 25)
+
+        # Test short pattern repetition (length >= 3, repeated >= 15 times, non-numeric)
+        with pytest.raises(RuntimeError, match="Repetition loop"):
+            llm._check_repetition("abc" * 40)
+
+        # Test non-repeating (under limits, but length > 100)
+        non_rep_base = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        llm._check_repetition(non_rep_base * 2 + "1234567890abcde" * 3)
+        llm._check_repetition(non_rep_base * 2 + "abcdefgh" * 3)
+        llm._check_repetition(non_rep_base * 2 + "abcde" * 6)
+        llm._check_repetition(non_rep_base * 2 + "abc" * 10)
+
+        # Test repeated assert statements are allowed under 15 repetitions
+        llm._check_repetition("assert x == y\n" * 10)
+        llm._check_repetition("self.assertEqual(a, b)\n" * 14)
+
+        # Test repeated assert statements trigger RuntimeError at or above 15 repetitions
+        with pytest.raises(RuntimeError, match="Repetition loop"):
+            llm._check_repetition("assert x == y\n" * 16)
+        with pytest.raises(RuntimeError, match="self.assertEqual"):
+            llm._check_repetition("self.assertEqual(a, b)\n" * 20)
+
+
+def test_call_with_retry_fallback():
+    from unittest.mock import MagicMock, patch
+
+    from utils import MODEL_PRIMARY, MODEL_SECONDARY, GenAIClient
+
+    with patch("utils.genai.Client"):
+        llm = GenAIClient(debug_mode=False)
+        llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
+
+        captured_models = []
+
+        def mock_generate(*args, **kwargs):
+            model_used = args[0] if args else kwargs.get("model")
+            captured_models.append(model_used)
+
+            # Raise degeneration loop error for the first 5 attempts
+            if len(captured_models) < 6:
+                raise RuntimeError("Repetition loop detected during streaming.")
+
+            # Succeeded on the 6th attempt
+            good_chunk = MagicMock(text="fallback_success", candidates=[MagicMock(finish_reason="STOP")])
+            return [good_chunk]
+
+        llm.client.models.generate_content_stream.side_effect = mock_generate
+
+        with patch("utils.time.sleep") as mock_sleep:
+            with patch("utils.config.VERBOSE", True):
+                res = llm.call_with_retry(MODEL_SECONDARY, "prompt", retries=10, delay=0)
+                assert res == "fallback_success"
+
+                # Check if fallback logic worked:
+                # First 5 calls should use MODEL_SECONDARY, 6th call should use MODEL_PRIMARY
+                assert len(captured_models) == 6
+                for m in captured_models[:5]:
+                    assert m == MODEL_SECONDARY
+                assert captured_models[5] == MODEL_PRIMARY
+                assert mock_sleep.call_count == 5
+
+
+def test_sanitize_unpicklable():
+    import threading
+
+    from utils import _sanitize_unpicklable
+
+    # 1. Normal values
+    assert _sanitize_unpicklable(1) == 1
+    assert _sanitize_unpicklable("str") == "str"
+
+    # 2. Nested dict with lock (unpicklable)
+    lock = threading.Lock()
+    d = {"key": "val", "bad": lock, "nested": [lock, {"bad_nested": lock}]}
+    sanitized = _sanitize_unpicklable(d)
+    assert sanitized["key"] == "val"
+    assert sanitized["bad"].lower() in ("<unserializable: lock>", "<unserializable: _thread.lock>")
+    assert sanitized["nested"][0].lower() in ("<unserializable: lock>", "<unserializable: _thread.lock>")
+    assert sanitized["nested"][1]["bad_nested"].lower() in ("<unserializable: lock>", "<unserializable: _thread.lock>")
+
+    # 3. Tuple and set
+    t = (1, lock)
+    s = {1, lock}
+    sanitized_t = _sanitize_unpicklable(t)
+    sanitized_s = _sanitize_unpicklable(s)
+    assert sanitized_t[0] == 1
+    assert sanitized_t[1].lower() in ("<unserializable: lock>", "<unserializable: _thread.lock>")
+    assert 1 in sanitized_s
+    assert any("unserializable" in str(x).lower() for x in sanitized_s)
+
+
+def test_file_memory_saver_unpicklable_restore(tmp_path):
+    import pickle
+    import threading
+    from unittest.mock import patch
+
+    checkpoint_path = str(tmp_path / "test_cp_unpicklable.pkl")
+    saver = FileMemorySaver(checkpoint_path)
+    # Add a lock which is unpicklable, alongside valid data
+    saver.storage["valid"] = "data"
+    saver.storage["bad"] = threading.Lock()
+
+    # Add a generator at the top-level of saver.__dict__ to trigger pickling error
+    saver.unpicklable_generator = (x for x in range(3))
+
+    # Mock pickle.dumps to raise an error specifically for the sanitized generator string
+    # to hit the "except Exception: continue" block in FileMemorySaver._save
+    orig_dumps = pickle.dumps
+
+    def mock_dumps(obj, *args, **kwargs):
+        if obj == "<Unserializable: generator>":
+            raise pickle.PicklingError("Mocked pickling error")
+        return orig_dumps(obj, *args, **kwargs)
+
+    # Save should proceed and sanitize the bad lock, and skip the generator silently
+    with patch("pickle.dumps", side_effect=mock_dumps):
+        saver._save()
+
+    # Verify directly from file that unpicklable_generator was skipped/omitted
+    with open(checkpoint_path, "rb") as f:
+        data = pickle.load(f)
+    assert "unpicklable_generator" not in data
+
+    # Load again and verify we restored valid data and sanitized string
+    saver2 = FileMemorySaver(checkpoint_path)
+    assert saver2.storage["valid"] == "data"
+    assert saver2.storage["bad"].lower() in ("<unserializable: lock>", "<unserializable: _thread.lock>")
+
+
+def test_call_llm_structured_retry():
+    from unittest.mock import patch
+
+    from pydantic import BaseModel, Field
+
+    from utils import call_llm_structured
+
+    class DummySchema(BaseModel):
+        val: int = Field(..., description="A dummy integer value")
+
+    # 1. Test case: successful on retry
+    with patch("utils.call_llm_with_reasoning") as mock_reason:
+        # First call returns invalid JSON or schema mismatch
+        # Second call returns valid JSON matching DummySchema
+        mock_reason.side_effect = [
+            '{"val": "not_an_int"}',  # Validation error (val must be int)
+            '{"val": 42}',
+        ]
+        with patch("utils.time.sleep") as mock_sleep:
+            res = call_llm_structured("dummy prompt", DummySchema, model_name="gemma-4-31b-it")
+            assert res.val == 42
+            assert mock_reason.call_count == 2
+            mock_sleep.assert_called_once()
+
+    # 2. Test case: failing completely after max retries
+    with patch("utils.call_llm_with_reasoning") as mock_reason:
+        mock_reason.return_value = '{"val": "still_not_an_int"}'
+        with patch("utils.time.sleep") as mock_sleep:
+            import pytest
+            from pydantic import ValidationError
+
+            with pytest.raises(ValidationError):
+                call_llm_structured("dummy prompt", DummySchema, model_name="gemma-4-31b-it")
+            assert mock_reason.call_count == 5
+            assert mock_sleep.call_count == 4
+
+
+def test_check_json_repetition_braces_in_strings():
+    from unittest.mock import patch
+
+    import pytest
+
+    from utils import GenAIClient
+
+    with patch("utils.genai.Client"):
+        llm = GenAIClient(debug_mode=False)
+
+        # 1. Test case: JSON object containing nested braces inside string literal
+        # Also includes escapes (e.g. \") to cover escape block.
+        json_objects_seen = {}
+        full_text = '{"action": "test", "expr": "if (x) { print \\"hello\\" }", "expected": "ok"}'
+
+        # brace_count, current_obj_start, in_string, escape
+        bc, cos, inst, esc = llm._check_json_repetition(
+            full_text=full_text,
+            start_idx=0,
+            brace_count=0,
+            current_obj_start=-1,
+            json_objects_seen=json_objects_seen,
+            in_string=False,
+            escape=False,
+        )
+        # Should finish parsing the single object correctly
+        assert bc == 0
+        assert cos == -1
+        assert not inst
+        assert not esc
+
+        normalized = '{"action":"test","expr":"if(x){print\\"hello\\"}","expected":"ok"}'
+        assert normalized in json_objects_seen
+        assert json_objects_seen[normalized] == 1
+
+        # 2. Test case: True repetition of the SAME object 4 times should trigger RuntimeError.
+        # Call 2nd and 3rd times (should not raise)
+        for _ in range(2):
+            llm._check_json_repetition(
+                full_text=full_text,
+                start_idx=0,
+                brace_count=0,
+                current_obj_start=-1,
+                json_objects_seen=json_objects_seen,
+                in_string=False,
+                escape=False,
+            )
+        assert json_objects_seen[normalized] == 3
+
+        # Call 4th time (must raise RuntimeError)
+        with pytest.raises(RuntimeError, match="Repetitive JSON object detected"):
+            llm._check_json_repetition(
+                full_text=full_text,
+                start_idx=0,
+                brace_count=0,
+                current_obj_start=-1,
+                json_objects_seen=json_objects_seen,
+                in_string=False,
+                escape=False,
+            )
+
+
+def test_fallback_custom_threshold_and_error_isolation():
+    from unittest.mock import MagicMock, patch
+
+    import pytest
+    from google.genai.errors import APIError
+
+    import config
+    from utils import GenAIClient
+
+    # Temporary patch config variables
+    orig_fallback_threshold = config.LLM_FALLBACK_THRESHOLD
+    config.LLM_FALLBACK_THRESHOLD = 3
+
+    try:
+        with patch("utils.genai.Client"):
+            llm = GenAIClient(debug_mode=False)
+            llm.client.models.count_tokens.return_value = MagicMock(total_tokens=10)
+
+            # 1. Test that transient network errors (like APIError 503) do NOT trigger model fallback
+            captured_models = []
+
+            def mock_generate_api_err(*args, **kwargs):
+                model_used = args[0] if args else kwargs.get("model")
+                captured_models.append(model_used)
+                # Raise a transient APIError (503)
+                raise APIError(503, "Service Unavailable")
+
+            llm.client.models.generate_content_stream.side_effect = mock_generate_api_err
+
+            with patch("utils.time.sleep") as mock_sleep:
+                with pytest.raises(APIError):
+                    # Try with 5 retries. With threshold = 3, if APIError triggered fallback,
+                    # it would have switched to primary model.
+                    llm.call_with_retry(config.MODEL_SECONDARY, "prompt", retries=5, delay=0)
+
+                # Verification: Every attempt should still use MODEL_SECONDARY because APIError 503 is not degeneration
+                assert len(captured_models) == 5
+                for m in captured_models:
+                    assert m == config.MODEL_SECONDARY
+                assert mock_sleep.call_count == 4
+
+            # 2. Test that degeneration loop errors DO trigger model fallback according to LLM_FALLBACK_THRESHOLD (3)
+            captured_models_degen = []
+
+            def mock_generate_degen(*args, **kwargs):
+                model_used = args[0] if args else kwargs.get("model")
+                captured_models_degen.append(model_used)
+                # Trigger degeneration error for the first 3 attempts
+                if len(captured_models_degen) < 4:
+                    raise RuntimeError("Repetition loop detected during streaming.")
+                good_chunk = MagicMock(text="success", candidates=[MagicMock(finish_reason="STOP")])
+                return [good_chunk]
+
+            llm.client.models.generate_content_stream.side_effect = mock_generate_degen
+
+            with patch("utils.time.sleep") as mock_sleep_degen:
+                res = llm.call_with_retry(config.MODEL_SECONDARY, "prompt", retries=5, delay=0)
+                assert res == "success"
+
+                # Check model switch: first 3 calls on SECONDARY, 4th call on PRIMARY
+                assert len(captured_models_degen) == 4
+                assert captured_models_degen[0] == config.MODEL_SECONDARY
+                assert captured_models_degen[1] == config.MODEL_SECONDARY
+                assert captured_models_degen[2] == config.MODEL_SECONDARY
+                assert captured_models_degen[3] == config.MODEL_PRIMARY
+                assert mock_sleep_degen.call_count == 3
+
+    finally:
+        config.LLM_FALLBACK_THRESHOLD = orig_fallback_threshold

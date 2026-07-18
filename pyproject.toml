@@ -30,7 +30,7 @@ filterwarnings = [
     "ignore:'_UnionGenericAlias' is deprecated:DeprecationWarning:google.genai.types",
     "ignore::UserWarning:google.genai._common",
 ]
-norecursedirs = ["artifacts*", "mlartifacts*"]
+norecursedirs = ["artifacts*", "mlartifacts*", "scratch*"]
 
 [tool.coverage.run]
 omit = [
@@ -38,12 +38,17 @@ omit = [
     "run_bc_demo.py",
     "inspect_checkpoint4.py",
     "bc_clone.py",
-    "tests/*"
+    "tests/*",
+    "scratch/*",
+    "diagtools/*",
+    "artifacts/*",
+    "py_bc_impl.py",
+    "py_bc.py"
 ]
 
 [tool.ruff]
 line-length = 120
-exclude = ["artifacts*", "mlartifacts*"]
+exclude = ["artifacts*", "mlartifacts*", "scratch*", "py_bc_impl.py", "py_bc.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
@@ -55,5 +60,9 @@ check_untyped_defs = true
 exclude = [
     "^artifacts",
     "^mlartifacts",
+    "^scratch",
+    "^mlruns",
     "bc_clone.py",
+    "py_bc_impl.py",
+    "py_bc.py",
 ]

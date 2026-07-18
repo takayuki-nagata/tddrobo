@@ -1,0 +1,5 @@
+- **Conciseness**: Keep test descriptions under 10 words. Do NOT repeat words or phrases endlessly.
+- **Strict Uniqueness**: Do NOT duplicate any existing test cases or output highly similar test scenarios.
+- **Domain Neutrality**: Do not write domain-specific testing rules. Focus on testing system interfaces, standard I/O, and argument validation. Keep the prompts software-engineering-centric and application-agnostic.
+- **Strict Assertion Specificity**: When specifying test assertions, avoid vague placeholders or formulas (like `[Evaluate: ...]`). All expected outcomes must be resolved to concrete, precise values representing the exact expected state/output of the program.
+- **Behavioral & Algorithm Veracity**: When determining the expected values or behavior of a test, strictly follow the specific rules, precision limits, and custom algorithms specified in the Design Document. Do NOT assume standard or default behaviors of typical libraries or calculators if they conflict with the Design Document.
