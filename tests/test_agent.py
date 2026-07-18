@@ -55,6 +55,14 @@ from agent import (
 from schema import BugReport, DesignDocument, RefactorDecision, TDDState, TestCase, TestPlan, TestPlanReviewReport
 
 
+def test_agent_print_override(capsys):
+    from agent import print as agent_print
+
+    agent_print("Hello", end="", flush=True)
+    captured = capsys.readouterr()
+    assert captured.out == "Hello"
+
+
 @patch("agent.requests.get")
 @patch("agent.save_artifact")
 def test_fetch_spec_success(mock_save_artifact, mock_get):
@@ -3215,7 +3223,7 @@ def test_oracle_verification_math_safeguards(monkeypatch):
         expected_match = re.search(r'expected\s*=\s*["\'](.*?)["\']', body)
         expr = expr_match.group(1) if expr_match else ""
         expected_val = expected_match.group(1).replace("\\n", "\n") if expected_match else ""
-        return expr, expected_val, []
+        return expr, expected_val, [expr]
 
     monkeypatch.setattr(agent, "_extract_oracle_target_llm", mock_extract_llm)
 
@@ -4054,6 +4062,14 @@ def test_analyze_architecture(mock_llm):
             assert "conflation of statement and expression" in res["architecture_audit"]
             assert res["next_action"] == "update_design_for_req"
 
+    # 2b. Spec file exists but fails to read (architectural_bottleneck)
+    with patch("os.path.exists", return_value=True):
+        with patch("builtins.open", side_effect=IOError("read error")):
+            res = analyze_architecture(state)
+            assert res["loop_detected"] is True
+            assert "conflation of statement and expression" in res["architecture_audit"]
+            assert res["next_action"] == "update_design_for_req"
+
     # 3. Local bug classification routing
     mock_audit_local = ArchitectureAudit(
         classification="local_bug",
@@ -4098,3 +4114,18 @@ def test_analyze_architecture(mock_llm):
         assert res["audit_loop_count"] == 0
         # Classification in report is updated to architectural_bottleneck
         assert "Classification:\narchitectural_bottleneck" in res["architecture_audit"]
+
+
+def test_agent_module_delattr():
+    import sys
+
+    import agent
+
+    # 1. Nonexistent attribute deletion (covers the except block)
+    delattr(agent, "nonexistent_mock_attr")
+
+    # 2. Existing attribute deletion on submodules propagation
+    setattr(agent, "test_propagation_attr", "prop_val")
+    assert getattr(sys.modules["agent.nodes"], "test_propagation_attr") == "prop_val"
+    delattr(agent, "test_propagation_attr")
+    assert not hasattr(sys.modules["agent.nodes"], "test_propagation_attr")

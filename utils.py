@@ -16,6 +16,7 @@ from google.genai.errors import APIError, ClientError
 from langgraph.checkpoint.memory import MemorySaver
 
 import config
+from logger import print
 
 logging.getLogger("mlflow").setLevel(logging.ERROR)
 
@@ -700,102 +701,127 @@ class GenAIClient:
 
                 return full_text or ""
             except Exception as e:
-                is_retryable = False
-                is_degeneration = False
-                err_str = str(e).lower()
-
-                is_deadline_exceeded = "deadline_exceeded" in err_str or (
-                    isinstance(e, APIError) and hasattr(e, "code") and e.code == 504
+                attempt, standard_attempt, degen_count, model_name = self._handle_api_error(
+                    e,
+                    attempt=attempt,
+                    standard_attempt=standard_attempt,
+                    degen_count=degen_count,
+                    model_name=model_name,
+                    retries=retries,
+                    delay=delay,
+                    temperature=temperature,
                 )
-                is_net_timeout = (
-                    isinstance(e, TimeoutError) or "timeout" in type(e).__name__.lower() or "timeout" in err_str
-                )
-
-                sleep_delay = delay
-                if isinstance(e, RuntimeError) and (
-                    "max_output_tokens" in str(e) or "Repetition loop" in str(e) or "Invalid JSON" in str(e)
-                ):
-                    is_retryable = True
-                    is_degeneration = True
-                elif is_deadline_exceeded:
-                    is_retryable = True
-                    is_degeneration = True
-                elif is_net_timeout:
-                    is_retryable = True
-                    is_degeneration = False
-                elif isinstance(e, APIError) and hasattr(e, "code") and e.code >= 500:
-                    is_retryable = True
-                elif (isinstance(e, (APIError, ClientError)) and hasattr(e, "code") and e.code == 429) or (
-                    "quota" in str(e).lower() or "resource_exhausted" in str(e).lower()
-                ):
-                    is_retryable = True
-                    # Stricter exponential backoff logic with random jitter
-                    base_retry_delay = delay
-                    exp_delay = int(min(base_retry_delay * (2**attempt), 120))
-
-                    import random as _random
-
-                    jitter = _random.randint(1, 5)
-
-                    # Parse the API's suggested retry delay from the error message
-                    import re as _re
-
-                    retry_match = _re.search(r"retry in (\d+(?:\.\d+)?)s", str(e), _re.IGNORECASE)
-
-                    is_daily_limit = "daily" in err_str or "per day" in err_str or "perday" in err_str
-
-                    if retry_match:
-                        suggested_delay = int(float(retry_match.group(1))) + 5
-                        sleep_delay = max(suggested_delay, exp_delay) + jitter
-                    else:
-                        sleep_delay = exp_delay + jitter
-
-                    # If the delay is very long (more than 180 seconds) or daily quota is exceeded, fail immediately
-                    if is_daily_limit or sleep_delay > 180:
-                        print(f"\n🚨 Daily or long-term quota exceeded: {str(e)}. Aborting retry loop.")
-                        is_retryable = False
-                    else:
-                        # For minor temporary rate limits, wait out without incrementing 'standard_attempt'
-                        # But increment 'attempt' to scale up the exponential backoff delay correctly
-                        print(
-                            f"\n⏳ Temporary quota limit hit ({str(e)}). Sleeping for {sleep_delay}s before retrying. "
-                            f"(Attempts remaining: {retries - standard_attempt})"
-                        )
-                        time.sleep(sleep_delay)
-                        attempt += 1
-                        continue
-                elif "connect" in type(e).__name__.lower() or "connection" in str(e).lower():
-                    is_retryable = True
-
-                if is_retryable and standard_attempt < retries - 1:
-                    if is_degeneration:
-                        degen_count += 1
-                    # Fallback strategy: If secondary model fails repeatedly (5+ attempts),
-                    # switch to primary model to stabilize generation.
-                    if model_name == MODEL_SECONDARY and degen_count >= config.LLM_FALLBACK_THRESHOLD:
-                        print(
-                            f"\n🔄 Fallback Triggered: Switching from secondary model '{MODEL_SECONDARY}' "
-                            f"to primary model '{MODEL_PRIMARY}' after {degen_count} degeneration failures."
-                        )
-                        model_name = MODEL_PRIMARY
-                        degen_count = 0  # Reset temperature scaling for the new model
-
-                    if degen_count == 0:
-                        next_temp = temperature
-                    else:
-                        target_temp = max(0.5, temperature)
-                        next_temp = temperature + (target_temp - temperature) * (1.0 - 0.5**degen_count)
-                    print(
-                        f"\n⚠️ Recoverable error ({str(e)}). Retrying in {sleep_delay} seconds... "
-                        f"(Next temp: {next_temp:.3f}, Attempt: {standard_attempt + 1}/{retries}, "
-                        f"Active model: {model_name})"
-                    )
-                    time.sleep(sleep_delay)
-                    attempt += 1
-                    standard_attempt += 1
-                else:
-                    raise
         return ""
+
+    def _handle_api_error(
+        self,
+        e: Exception,
+        attempt: int,
+        standard_attempt: int,
+        degen_count: int,
+        model_name: str,
+        retries: int,
+        delay: int,
+        temperature: float,
+    ) -> tuple[int, int, int, str]:
+        """
+        Handles exception processing, rate limiting, degeneration, and fallback switches.
+        Raises the exception if it is not recoverable.
+        """
+        is_retryable = False
+        is_degeneration = False
+        err_str = str(e).lower()
+
+        is_deadline_exceeded = "deadline_exceeded" in err_str or (
+            isinstance(e, APIError) and hasattr(e, "code") and e.code == 504
+        )
+        is_net_timeout = isinstance(e, TimeoutError) or "timeout" in type(e).__name__.lower() or "timeout" in err_str
+
+        sleep_delay = delay
+        if isinstance(e, RuntimeError) and (
+            "max_output_tokens" in str(e) or "Repetition loop" in str(e) or "Invalid JSON" in str(e)
+        ):
+            is_retryable = True
+            is_degeneration = True
+        elif is_deadline_exceeded:
+            is_retryable = True
+            is_degeneration = True
+        elif is_net_timeout:
+            is_retryable = True
+            is_degeneration = False
+        elif isinstance(e, APIError) and hasattr(e, "code") and e.code >= 500:
+            is_retryable = True
+        elif (isinstance(e, (APIError, ClientError)) and hasattr(e, "code") and e.code == 429) or (
+            "quota" in str(e).lower() or "resource_exhausted" in str(e).lower()
+        ):
+            is_retryable = True
+            # Stricter exponential backoff logic with random jitter
+            base_retry_delay = delay
+            exp_delay = int(min(base_retry_delay * (2**attempt), config.LLM_MAX_EXP_DELAY_SEC))
+
+            import random as _random
+
+            jitter = _random.randint(config.LLM_JITTER_MIN, config.LLM_JITTER_MAX)
+
+            # Parse the API's suggested retry delay from the error message
+            import re as _re
+
+            retry_match = _re.search(r"retry in (\d+(?:\.\d+)?)s", str(e), _re.IGNORECASE)
+
+            is_daily_limit = "daily" in err_str or "per day" in err_str or "perday" in err_str
+
+            if retry_match:
+                suggested_delay = int(float(retry_match.group(1))) + config.LLM_RATE_LIMIT_BUFFER_SEC
+                sleep_delay = max(suggested_delay, exp_delay) + jitter
+            else:
+                sleep_delay = exp_delay + jitter
+
+            # If the delay is very long (more than config.LLM_MAX_RECOVERABLE_DELAY_SEC seconds)
+            # or daily quota is exceeded, fail immediately
+            if is_daily_limit or sleep_delay > config.LLM_MAX_RECOVERABLE_DELAY_SEC:
+                print(f"\n🚨 Daily or long-term quota exceeded: {str(e)}. Aborting retry loop.")
+                is_retryable = False
+            else:
+                # For minor temporary rate limits, wait out without incrementing 'standard_attempt'
+                # But increment 'attempt' to scale up the exponential backoff delay correctly
+                print(
+                    f"\n⏳ Temporary quota limit hit ({str(e)}). Sleeping for {sleep_delay}s before retrying. "
+                    f"(Attempts remaining: {retries - standard_attempt})"
+                )
+                time.sleep(sleep_delay)
+                return attempt + 1, standard_attempt, degen_count, model_name
+        elif "connect" in type(e).__name__.lower() or "connection" in str(e).lower():
+            is_retryable = True
+
+        if is_retryable and standard_attempt < retries - 1:
+            if is_degeneration:
+                degen_count += 1
+            # Fallback strategy: If secondary model fails repeatedly (5+ attempts),
+            # switch to primary model to stabilize generation.
+            if model_name == MODEL_SECONDARY and degen_count >= config.LLM_FALLBACK_THRESHOLD:
+                print(
+                    f"\n🔄 Fallback Triggered: Switching from secondary model '{MODEL_SECONDARY}' "
+                    f"to primary model '{MODEL_PRIMARY}' after {degen_count} degeneration failures."
+                )
+                model_name = MODEL_PRIMARY
+                degen_count = 0  # Reset temperature scaling for the new model
+
+            if degen_count == 0:
+                next_temp = temperature
+            else:
+                target_temp = max(config.LLM_DEGEN_TEMP_TARGET, temperature)
+                next_temp = temperature + (target_temp - temperature) * (
+                    1.0 - config.LLM_TEMP_SCALING_FACTOR**degen_count
+                )
+            print(
+                f"\n⚠️ Recoverable error ({str(e)}). Retrying in {sleep_delay} seconds... "
+                f"(Next temp: {next_temp:.3f}, Attempt: {standard_attempt + 1}/{retries}, "
+                f"Active model: {model_name})"
+            )
+            time.sleep(sleep_delay)
+            return attempt + 1, standard_attempt + 1, degen_count, model_name
+        else:
+            raise e
 
     def generate_with_reasoning(
         self,
@@ -923,7 +949,7 @@ def call_llm_structured(
                     f"(e.g. no natural language in raw expected outputs)."
                 )
                 current_prompt = prompt + error_feedback
-                time.sleep(2)
+                time.sleep(config.LLM_STRUCTURED_RETRY_DELAY_SEC)
         else:
             return res
 

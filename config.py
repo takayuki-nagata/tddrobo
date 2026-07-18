@@ -82,4 +82,41 @@ ARTIFACTS_DIR = os.path.join(TDD_BASE_ARTIFACTS_DIR, SESSION_ID)
 DEBUG_MODE = os.environ.get("DEBUG_MODE", "false").lower() == "true"
 VERBOSE = os.environ.get("TDD_VERBOSE", "false").lower() == "true"
 
+# --- LLM and Conversion Settings ---
+CHARS_TO_TOKENS_RATIO = int(os.environ.get("TDD_CHARS_TO_TOKENS_RATIO", 4))
+LLM_LOOP_TEMPERATURE = float(os.environ.get("TDD_LLM_LOOP_TEMPERATURE", 0.5))
+LLM_DEFAULT_TEMPERATURE = float(os.environ.get("TDD_LLM_DEFAULT_TEMPERATURE", 0.0))
+
+# --- Rollback and Review Limits ---
+MAX_DESIGN_ROLLBACKS = int(os.environ.get("TDD_MAX_DESIGN_ROLLBACKS", 3))
+MAX_REGRESSION_ROLLBACKS = int(os.environ.get("TDD_MAX_REGRESSION_ROLLBACKS", 2))
+MAX_DESIGN_REVIEW_ITERATIONS = int(os.environ.get("TDD_MAX_DESIGN_REVIEW_ITERATIONS", 3))
+
+# --- Truncation & Output Limits ---
+MAX_TEST_OUTPUT_CHARS = int(os.environ.get("TDD_MAX_TEST_OUTPUT_CHARS", 8000))
+BALANCED_TEST_OUTPUT_MAX_CHARS = int(os.environ.get("TDD_BALANCED_TEST_OUTPUT_MAX_CHARS", 4000))
+BUG_REPORT_TEST_OUTPUT_MAX_CHARS = int(os.environ.get("TDD_BUG_REPORT_TEST_OUTPUT_MAX_CHARS", 3500))
+
+# --- Timeout Values ---
+EARLY_TEST_CHECK_TIMEOUT_SEC = int(os.environ.get("TDD_EARLY_TEST_CHECK_TIMEOUT_SEC", 5))
+
+# --- LLM API Retry & Rate-limit Handling (utils.py) ---
+LLM_STRUCTURED_RETRY_DELAY_SEC = int(os.environ.get("TDD_LLM_STRUCTURED_RETRY_DELAY_SEC", 2))
+LLM_MAX_EXP_DELAY_SEC = int(os.environ.get("TDD_LLM_MAX_EXP_DELAY_SEC", 120))
+LLM_JITTER_MIN = int(os.environ.get("TDD_LLM_JITTER_MIN", 1))
+LLM_JITTER_MAX = int(os.environ.get("TDD_LLM_JITTER_MAX", 5))
+LLM_RATE_LIMIT_BUFFER_SEC = int(os.environ.get("TDD_LLM_RATE_LIMIT_BUFFER_SEC", 5))
+LLM_MAX_RECOVERABLE_DELAY_SEC = int(os.environ.get("TDD_LLM_MAX_RECOVERABLE_DELAY_SEC", 180))
+LLM_DEGEN_TEMP_TARGET = float(os.environ.get("TDD_LLM_DEGEN_TEMP_TARGET", 0.5))
+LLM_TEMP_SCALING_FACTOR = float(os.environ.get("TDD_LLM_TEMP_SCALING_FACTOR", 0.5))
+
+# --- MLflow & CLI defaults (cli.py) ---
+MLFLOW_EXPERIMENT_NAME = os.environ.get("TDD_MLFLOW_EXPERIMENT_NAME", "TDD_Agent_Experiment")
+MLFLOW_DEFAULT_URI = os.environ.get("TDD_MLFLOW_DEFAULT_URI", "http://localhost:5000")
+MLFLOW_LOCAL_DB_URI = os.environ.get("TDD_MLFLOW_LOCAL_DB_URI", "sqlite:///mlflow.db")
+MLFLOW_PING_TIMEOUT_SEC = float(os.environ.get("TDD_MLFLOW_PING_TIMEOUT_SEC", 1.0))
+CONFIG_MISMATCH_WARN_DELAY_SEC = int(os.environ.get("TDD_CONFIG_MISMATCH_WARN_DELAY_SEC", 10))
+LANGGRAPH_RECURSION_LIMIT = int(os.environ.get("TDD_LANGGRAPH_RECURSION_LIMIT", 150))
+
+
 ORACLE_VERIFIER: typing.Optional[typing.Callable[..., str]] = None

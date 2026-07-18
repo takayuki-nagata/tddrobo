@@ -83,3 +83,18 @@ GENERATE_REFACTOR_BUG_REPORT_PROMPT = _load_prompt("generate_refactor_bug_report
 
 EXTRACT_ORACLE_TARGET_PROMPT = _load_prompt("extract_oracle_target.md")
 JUDGE_ORACLE_DISCREPANCY_PROMPT = _load_prompt("judge_oracle_discrepancy.md")
+
+ANALYZE_ARCHITECTURE_PROMPT = _load_prompt("analyze_architecture.md")
+IMPLEMENT_LOGIC_REFACTOR_MANDATE = _load_prompt("implement_logic_refactor_mandate.md")
+GENERATE_DESIGN_REFACTOR_DIRECTIVE = _load_prompt("generate_design_refactor_directive.md")
+
+PLAN_TESTS_ORACLE_WARNING = _load_prompt("plan_tests_oracle_warning.md")
+GENERATE_TESTS_BUG_FIX_CONTEXT = _load_prompt("generate_tests_bug_fix_context.md")
+GENERATE_TESTS_SYNTAX_FIX_CONTEXT = _load_prompt("generate_tests_syntax_fix_context.md")
+IMPLEMENT_LOGIC_DESIGN_UPDATE_INSTRUCTION = _load_prompt("implement_logic_design_update_instruction.md")
+IMPLEMENT_LOGIC_UNIQUENESS_ADVICE = _load_prompt("implement_logic_uniqueness_advice.md")
+IMPLEMENT_LOGIC_UNIQUENESS_MULTI_MATCH = _load_prompt("implement_logic_uniqueness_multi_match.md")
+IMPLEMENT_LOGIC_UNIQUENESS_MULTI_MATCH_SIMPLE = _load_prompt("implement_logic_uniqueness_multi_match_simple.md")
+IMPLEMENT_LOGIC_FAILING_SEARCH_BLOCK_ADVICE = _load_prompt("implement_logic_failing_search_block_advice.md")
+REFACTOR_LOGIC_BUG_FIX_WARNING = _load_prompt("refactor_logic_bug_fix_warning.md")
+REFACTOR_LOGIC_FALLBACK_WARNING = _load_prompt("refactor_logic_fallback_warning.md")

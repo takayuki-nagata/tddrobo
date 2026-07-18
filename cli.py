@@ -9,17 +9,16 @@ import mlflow
 
 import config
 from agent import TDDAgent
+from logger import print
 from utils import FileMemorySaver
 
 DEFAULT_IMPL_NAME = config.DEFAULT_IMPL_NAME
 DEFAULT_TEST_NAME = config.DEFAULT_TEST_NAME
 
 
-# --- Execution Logic ---
-def main(args_list=None):
+def parse_arguments(args_list=None):
     """
-    Main entry point for the TDD Agent Workflow.
-    Parses arguments, sets up the workspace, initializes the agent, and runs the LangGraph workflow.
+    Parses command line arguments and handles domain/python tips file reading.
     """
     parser = argparse.ArgumentParser(description="TDD Agent Workflow")
     parser.add_argument("--resume", action="store_true", help="Resume workflow from the last checkpoint")
@@ -88,19 +87,11 @@ def main(args_list=None):
     if args.verbose:
         config.VERBOSE = True
 
-    if args.draw_graph:
-        tdd_agent = TDDAgent()
-        try:
-            graph_path = "workflow_graph.png"
-            with open(graph_path, "wb") as graph_f:
-                graph_f.write(tdd_agent.get_graph().draw_mermaid_png())
-            print(f"✅ Saved workflow graph to {graph_path}")
-            return None
-        except Exception as e:
-            print(f"❌ Could not save workflow graph image: {e}")
-            sys.exit(1)
+    return args, parser
 
-    # Resolve session ID and paths
+
+def prepare_session_id(args):
+    """Resolves and returns the session_id to use."""
     session_id = args.session_id
     if args.resume and (not args.session_id or args.session_id == config.SESSION_ID):
         base_dir = config.TDD_BASE_ARTIFACTS_DIR
@@ -125,6 +116,158 @@ def main(args_list=None):
         else:
             session_id = args.session_id or config.SESSION_ID
             print(f"⚠️ No past session with checkpoint.pkl found to resume. Defaulting to session: '{session_id}'")
+    return session_id
+
+
+def acquire_session_lock(artifacts_dir, session_id):
+    """Establishes session-wide file lock using fcntl to prevent double running on the same session."""
+    lock_file_path = os.path.join(artifacts_dir, ".session.lock")
+    try:
+        import fcntl
+
+        lock_file_handle = open(lock_file_path, "w")
+        # Try to lock it. If blocked, raise BlockingIOError
+        fcntl.flock(lock_file_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return lock_file_handle
+    except BlockingIOError:
+        print(f"\n⚠️ ERROR: Session '{session_id}' is already locked and running in another instance.")
+        print("To run multiple workflows, please specify different session IDs or run them in separate sessions.\n")
+        sys.exit(1)
+    except Exception as e:
+        if config.VERBOSE:
+            print(f"Warning: Could not establish session lock: {e}")
+        return None
+
+
+def prepare_artifacts_directory(artifacts_dir, should_resume):
+    """Handles backup and cleaning of the artifacts directory if not resuming."""
+    if not should_resume:
+        # Check if directory has any real workflow artifacts other than the lock file or spec
+        has_run_artifacts = False
+        if os.path.exists(artifacts_dir):
+            for entry_name in os.listdir(artifacts_dir):
+                if entry_name not in ("specification.txt", ".session.lock"):
+                    has_run_artifacts = True
+                    break
+        if has_run_artifacts:
+            readme_path = os.path.join(artifacts_dir, "README.md")
+            if os.path.exists(readme_path):
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                backup_dir = f"{artifacts_dir}_{timestamp}"
+                os.makedirs(backup_dir, exist_ok=True)
+                for entry_name in os.listdir(artifacts_dir):
+                    if entry_name != ".session.lock":
+                        file_path = os.path.join(artifacts_dir, entry_name)
+                        shutil.move(file_path, os.path.join(backup_dir, entry_name))
+                print(f"📦 Backed up existing artifacts to {backup_dir}")
+
+                old_spec_path = os.path.join(backup_dir, "specification.txt")
+                if os.path.exists(old_spec_path):
+                    shutil.copy2(old_spec_path, os.path.join(artifacts_dir, "specification.txt"))
+            else:
+                print(f"[TDD Robo] 🧹 Cleaning up existing session artifacts in '{artifacts_dir}'...")
+                for entry_name in os.listdir(artifacts_dir):
+                    if entry_name not in ("specification.txt", ".session.lock"):
+                        file_path = os.path.join(artifacts_dir, entry_name)
+                        try:
+                            if os.path.isfile(file_path) or os.path.islink(file_path):
+                                os.remove(file_path)
+                            elif os.path.isdir(file_path):
+                                shutil.rmtree(file_path)
+                        except Exception as e:
+                            print(f"⚠️ Failed to delete {file_path}. Reason: {e}")
+
+
+def initialize_mlflow(should_resume, run_name):
+    """Configures MLflow tracking with automatic local fallback and autologging."""
+    mlflow_uri = config.MLFLOW_DEFAULT_URI
+    is_server_online = False
+
+    import socket
+
+    try:
+        # Test connection with configured ping timeout
+        # Parse host and port from URL
+        from urllib.parse import urlparse
+
+        parsed_url = urlparse(mlflow_uri)
+        host = parsed_url.hostname or "localhost"
+        port = parsed_url.port or 5000
+        with socket.create_connection((host, port), timeout=config.MLFLOW_PING_TIMEOUT_SEC):
+            is_server_online = True
+    except Exception:
+        pass
+
+    env_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if env_uri:
+        mlflow.set_tracking_uri(env_uri)
+    elif is_server_online:
+        mlflow.set_tracking_uri(mlflow_uri)
+    else:
+        local_db_uri = config.MLFLOW_LOCAL_DB_URI
+        print(f"\nℹ️ MLflow server at {mlflow_uri} is offline. Falling back to local database ({local_db_uri}).")
+        mlflow.set_tracking_uri(local_db_uri)
+
+    mlflow.set_experiment(config.MLFLOW_EXPERIMENT_NAME)
+    try:
+        mlflow.gemini.autolog()
+    except Exception as e:
+        print(f"Warning: Could not configure MLflow Gemini Autolog: {e}")
+
+    # Prevent MLflow's LangChain Tracer from crashing due to unsupported on_resume callback
+    if not should_resume:
+        try:
+            mlflow.langchain.autolog()
+        except Exception as e:
+            print(f"Warning: Could not configure MLflow LangChain Autolog: {e}")
+
+
+def display_workflow_results(final_state, artifacts_dir):
+    """Displays the workflow result summary (success or failure)."""
+    if final_state.get("success", False):
+        print("\n=== 🎉 TDD and Specification Retrieval Workflow Complete ===")
+        impl_name = final_state.get("module_name", DEFAULT_IMPL_NAME)
+        test_name = final_state.get("test_module_name", DEFAULT_TEST_NAME)
+        impl_path = os.path.join(artifacts_dir, impl_name)
+        test_path = os.path.join(artifacts_dir, test_name)
+
+        print(f"\n### 📄 Implementation Code (`{impl_path}`)")
+        print(f"```python\n{final_state.get('impl_code', '')}\n```")
+
+        print(f"\n### 🧪 Test Code (`{test_path}`)")
+        print(f"```python\n{final_state.get('tests_code', '')}\n```")
+
+        print(f"\n### 📝 {os.path.join(artifacts_dir, 'README.md')}")
+        print(final_state.get("readme_content", ""))
+
+    else:
+        print("\n=== ❌ Workflow Failed ===")
+        print("\n### 🐞 Last Test Output")
+        print(f"```text\n{final_state.get('test_output', 'No test output available.')}\n```")
+
+
+# --- Execution Logic ---
+def main(args_list=None):
+    """
+    Main entry point for the TDD Agent Workflow.
+    Parses arguments, sets up the workspace, initializes the agent, and runs the LangGraph workflow.
+    """
+    args, parser = parse_arguments(args_list)
+
+    if args.draw_graph:
+        tdd_agent = TDDAgent()
+        try:
+            graph_path = "workflow_graph.png"
+            with open(graph_path, "wb") as graph_f:
+                graph_f.write(tdd_agent.get_graph().draw_mermaid_png())
+            print(f"✅ Saved workflow graph to {graph_path}")
+            return None
+        except Exception as e:
+            print(f"❌ Could not save workflow graph image: {e}")
+            sys.exit(1)
+
+    # Resolve session ID and paths
+    session_id = prepare_session_id(args)
 
     # Update global config paths dynamically
     config.SESSION_ID = session_id
@@ -134,22 +277,8 @@ def main(args_list=None):
     # Ensure artifacts directory exists
     os.makedirs(artifacts_dir, exist_ok=True)
 
-    # Establish session-wide file lock using fcntl to prevent double running on the same session
-    lock_file_path = os.path.join(artifacts_dir, ".session.lock")
-    lock_file_handle = None
-    try:
-        import fcntl
-
-        lock_file_handle = open(lock_file_path, "w")
-        # Try to lock it. If blocked, raise BlockingIOError
-        fcntl.flock(lock_file_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        print(f"\n⚠️ ERROR: Session '{session_id}' is already locked and running in another instance.")
-        print("To run multiple workflows, please specify different session IDs or run them in separate sessions.\n")
-        sys.exit(1)
-    except Exception as e:
-        if config.VERBOSE:
-            print(f"Warning: Could not establish session lock: {e}")
+    # Establish session lock
+    lock_file_handle = acquire_session_lock(artifacts_dir, session_id)
 
     checkpoint_path = os.path.join(artifacts_dir, "checkpoint.pkl")
     checkpoint_exists = os.path.exists(checkpoint_path)
@@ -215,42 +344,11 @@ def main(args_list=None):
                 for m in mismatches:
                     print(f"  - {m}")
                 print("Applying these changes to the resumed workflow may cause inconsistent behavior.\n")
-                time.sleep(10)  # Give the user time to read the warning and cancel with Ctrl+C
+                time.sleep(
+                    config.CONFIG_MISMATCH_WARN_DELAY_SEC
+                )  # Give the user time to read the warning and cancel with Ctrl+C
     else:
-        # Check if directory has any real workflow artifacts other than the lock file or spec
-        has_run_artifacts = False
-        if os.path.exists(artifacts_dir):
-            for entry_name in os.listdir(artifacts_dir):
-                if entry_name not in ("specification.txt", ".session.lock"):
-                    has_run_artifacts = True
-                    break
-        if has_run_artifacts:
-            readme_path = os.path.join(artifacts_dir, "README.md")
-            if os.path.exists(readme_path):
-                timestamp = time.strftime("%Y%m%d_%H%M%S")
-                backup_dir = f"{artifacts_dir}_{timestamp}"
-                os.makedirs(backup_dir, exist_ok=True)
-                for entry_name in os.listdir(artifacts_dir):
-                    if entry_name != ".session.lock":
-                        file_path = os.path.join(artifacts_dir, entry_name)
-                        shutil.move(file_path, os.path.join(backup_dir, entry_name))
-                print(f"📦 Backed up existing artifacts to {backup_dir}")
-
-                old_spec_path = os.path.join(backup_dir, "specification.txt")
-                if os.path.exists(old_spec_path):
-                    shutil.copy2(old_spec_path, os.path.join(artifacts_dir, "specification.txt"))
-            else:
-                print(f"[TDD Robo] 🧹 Cleaning up existing session artifacts in '{artifacts_dir}'...")
-                for entry_name in os.listdir(artifacts_dir):
-                    if entry_name not in ("specification.txt", ".session.lock"):
-                        file_path = os.path.join(artifacts_dir, entry_name)
-                        try:
-                            if os.path.isfile(file_path) or os.path.islink(file_path):
-                                os.remove(file_path)
-                            elif os.path.isdir(file_path):
-                                shutil.rmtree(file_path)
-                        except Exception as e:
-                            print(f"⚠️ Failed to delete {file_path}. Reason: {e}")
+        prepare_artifacts_directory(artifacts_dir, should_resume)
 
     # Update config metadata for future resumes
     with open(config_meta_path, "w", encoding="utf-8") as meta_f:
@@ -273,7 +371,9 @@ def main(args_list=None):
         "regression_failure_policy": args.regression_failure_policy,
     }
 
-    config_opts = {"configurable": {"thread_id": config.SESSION_ID, "recursion_limit": 150}}
+    config_opts = {
+        "configurable": {"thread_id": config.SESSION_ID, "recursion_limit": config.LANGGRAPH_RECURSION_LIMIT}
+    }
 
     # Initialize Agent
     memory_saver = FileMemorySaver(checkpoint_path)
@@ -284,41 +384,8 @@ def main(args_list=None):
 
     config.ORACLE_VERIFIER = evaluate_math_expression
 
-    # Configure MLflow tracking with automatic local fallback
-    mlflow_uri = "http://localhost:5000"
-    is_server_online = False
-
-    import socket
-
-    try:
-        # Test connection to port 5000 with a 1-second timeout
-        with socket.create_connection(("localhost", 5000), timeout=1.0):
-            is_server_online = True
-    except Exception:
-        pass
-
-    env_uri = os.environ.get("MLFLOW_TRACKING_URI")
-    if env_uri:
-        mlflow.set_tracking_uri(env_uri)
-    elif is_server_online:
-        mlflow.set_tracking_uri(mlflow_uri)
-    else:
-        local_db_uri = "sqlite:///mlflow.db"
-        print(f"\nℹ️ MLflow server at {mlflow_uri} is offline. Falling back to local database ({local_db_uri}).")
-        mlflow.set_tracking_uri(local_db_uri)
-
-    mlflow.set_experiment("TDD_Agent_Experiment")
-    try:
-        mlflow.gemini.autolog()
-    except Exception as e:
-        print(f"Warning: Could not configure MLflow Gemini Autolog: {e}")
-
-    # Prevent MLflow's LangChain Tracer from crashing due to unsupported on_resume callback
-    if not should_resume:
-        try:
-            mlflow.langchain.autolog()
-        except Exception as e:
-            print(f"Warning: Could not configure MLflow LangChain Autolog: {e}")
+    # Configure MLflow
+    initialize_mlflow(should_resume, config.RUN_NAME)
 
     print("\n🚀 Invoking the TDD Agent Workflow...")
     with mlflow.start_run(run_name=config.RUN_NAME):
@@ -379,26 +446,14 @@ def main(args_list=None):
             mlflow.log_text(final_state["test_output"], "test_output.txt")
 
     # Display Results & Demo
-    if final_state.get("success", False):
-        print("\n=== 🎉 TDD and Specification Retrieval Workflow Complete ===")
-        impl_name = final_state.get("module_name", DEFAULT_IMPL_NAME)
-        test_name = final_state.get("test_module_name", DEFAULT_TEST_NAME)
-        impl_path = os.path.join(artifacts_dir, impl_name)
-        test_path = os.path.join(artifacts_dir, test_name)
+    display_workflow_results(final_state, artifacts_dir)
 
-        print(f"\n### 📄 Implementation Code (`{impl_path}`)")
-        print(f"```python\n{final_state.get('impl_code', '')}\n```")
-
-        print(f"\n### 🧪 Test Code (`{test_path}`)")
-        print(f"```python\n{final_state.get('tests_code', '')}\n```")
-
-        print(f"\n### 📝 {os.path.join(artifacts_dir, 'README.md')}")
-        print(final_state.get("readme_content", ""))
-
-    else:
-        print("\n=== ❌ Workflow Failed ===")
-        print("\n### 🐞 Last Test Output")
-        print(f"```text\n{final_state.get('test_output', 'No test output available.')}\n```")
+    # Clean up lock file handle cleanly
+    if lock_file_handle:
+        try:
+            lock_file_handle.close()
+        except Exception:
+            pass
 
     return final_state
 

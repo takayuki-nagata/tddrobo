@@ -34,6 +34,7 @@ norecursedirs = ["artifacts*", "mlartifacts*", "scratch*"]
 
 [tool.coverage.run]
 omit = [
+    ".venv/*",
     "cli.py",
     "run_bc_demo.py",
     "inspect_checkpoint4.py",
