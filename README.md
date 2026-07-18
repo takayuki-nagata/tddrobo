@@ -66,8 +66,8 @@ This project enforces strict code quality checks using `Ruff`, `Mypy`, and `Pyte
 
 To run the CI checks locally:
 ```bash
-chmod +x run_tests.sh
-./run_tests.sh
+chmod +x tests/run_tests.sh
+./tests/run_tests.sh
 ```
 
 ## MLflow Tracking

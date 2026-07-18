@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Takayuki Nagata
+
 import json
 import logging
 import os
@@ -222,7 +225,11 @@ class ProgressSpinner:
         while not self.stop_event.is_set():
             char = self.spinner[self.idx % len(self.spinner)]
             self.idx += 1
-            print(f"\r{self.message} {char}", end="", flush=True)
+            if self.message.startswith("⏳"):
+                rest = self.message[1:].lstrip()
+                print(f"\r⏳ {char} {rest}", end="", flush=True)
+            else:
+                print(f"\r{char} {self.message}", end="", flush=True)
             self.stop_event.wait(0.1)
 
     def stop(self, clear_message: str = ""):
@@ -464,7 +471,7 @@ class GenAIClient:
                                     spinner_idx += 1
                                     elapsed = current_time - start_time
                                     msg = (
-                                        f"⏳ Thinking... {spinner_char} "
+                                        f"⏳ {spinner_char} Thinking... "
                                         f"({len(thinking_text):,} chars, elapsed: {elapsed:.1f}s)"
                                     )
                                     print(msg, flush=True)
@@ -492,7 +499,7 @@ class GenAIClient:
                             if not config.VERBOSE:
                                 spinner_char = gen_spinner[spinner_idx % len(gen_spinner)]
                                 spinner_idx += 1
-                                gen_msg = f"\r⏳ Generating... {spinner_char} ({len(full_text):,} chars)"
+                                gen_msg = f"\r⏳ {spinner_char} Generating... ({len(full_text):,} chars)"
 
                                 if sys.stdout.isatty():
                                     print(gen_msg, end="", flush=True)
@@ -503,7 +510,7 @@ class GenAIClient:
                                     if size_diff >= 1000 or time_diff >= 5:
                                         elapsed = current_time - start_time
                                         msg = (
-                                            f"⏳ Generating... {spinner_char} "
+                                            f"⏳ {spinner_char} Generating... "
                                             f"({len(full_text):,} chars, elapsed: {elapsed:.1f}s)"
                                         )
                                         print(msg, flush=True)
@@ -536,7 +543,7 @@ class GenAIClient:
         elif not config.VERBOSE:
             if sys.stdout.isatty():
                 print(
-                    f"\r⏳ Generating... Done! ({len(full_text):,} chars in {elapsed_time:.1f}s)    ",
+                    f"\r⏳   Generating... Done! ({len(full_text):,} chars in {elapsed_time:.1f}s)    ",
                     flush=True,
                 )
             else:

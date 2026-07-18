@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Takayuki Nagata
+
 from tddrobo.agent.prompt_builder import (
     build_architecture_audit_prompt,
     build_design_prompt,

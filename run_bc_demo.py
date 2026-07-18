@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Takayuki Nagata
+
 """
 Execution script to build a POSIX-compliant bc clone using the TDD agent.
 It invokes the main workflow and runs a complex demonstration using the generated implementation.

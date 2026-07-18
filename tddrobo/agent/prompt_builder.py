@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 Takayuki Nagata
+
 from tddrobo import config
 from tddrobo.prompts import (
     ANALYZE_ARCHITECTURE_PROMPT,
