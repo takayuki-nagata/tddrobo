@@ -34,8 +34,11 @@ norecursedirs = ["artifacts*", "mlartifacts*"]
 
 [tool.coverage.run]
 omit = [
-    "main.py",
-    "bc_clone_by_gemma4.py"
+    "cli.py",
+    "run_bc_demo.py",
+    "inspect_checkpoint4.py",
+    "bc_clone.py",
+    "tests/*"
 ]
 
 [tool.ruff]
@@ -44,6 +47,7 @@ exclude = ["artifacts*", "mlartifacts*"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+ignore = ["E741", "E743"]
 
 [tool.mypy]
 ignore_missing_imports = true
@@ -51,4 +55,5 @@ check_untyped_defs = true
 exclude = [
     "^artifacts",
     "^mlartifacts",
+    "bc_clone.py",
 ]

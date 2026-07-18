@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 
@@ -11,6 +12,8 @@ import mlflow
 import pytest
 
 mlflow.tracing.disable()
+# Suppress informational messages about trace logging queues shutting down
+logging.getLogger("mlflow.tracing.export.async_export_queue").setLevel(logging.WARNING)
 
 
 @pytest.fixture
@@ -22,13 +25,13 @@ def mock_workspace(tmp_path):
 
 
 @pytest.fixture
-def mock_llm_client():
-    """Provide an LLMClient with the Google GenAI SDK completely mocked out."""
-    from utils import LLMClient
+def mock_genai_client():
+    """Provide a GenAIClient with the Google GenAI SDK completely mocked out."""
+    from utils import GenAIClient
 
     with patch("utils.genai.Client") as MockClient:
         # Prevent actual API calls during tests
-        client = LLMClient(debug_mode=False)
+        client = GenAIClient(debug_mode=False)
         yield client, MockClient
 
 

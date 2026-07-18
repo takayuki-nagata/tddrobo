@@ -43,10 +43,10 @@ It uses `subprocess` to run syntax checks and `pytest`. While it is designed to 
 
 ## Usage
 
-You can start the workflow by running `main.py` with your goal and specification URL:
+You can start the workflow by running `cli.py` with your goal and specification URL:
 
 ```bash
-uv run python main.py \
+uv run python cli.py \
   --goal "Build a simple calculator" \
   --spec-url "https://example.com/calculator-spec"
 ```
@@ -54,7 +54,7 @@ uv run python main.py \
 Alternatively, you can run the provided demonstration script which attempts to build a POSIX-compliant `bc` clone:
 
 ```bash
-uv run python bc_clone_by_gemma4.py
+uv run python run_bc_demo.py
 ```
 
 ### Artifacts

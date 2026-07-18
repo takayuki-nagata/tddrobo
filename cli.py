@@ -1,0 +1,357 @@
+import argparse
+import json
+import os
+import shutil
+import sys
+import time
+
+import mlflow
+
+import config
+from agent import TDDAgent
+from utils import FileMemorySaver
+
+DEFAULT_IMPL_NAME = config.DEFAULT_IMPL_NAME
+DEFAULT_TEST_NAME = config.DEFAULT_TEST_NAME
+
+
+# --- Execution Logic ---
+def main(args_list=None):
+    """
+    Main entry point for the TDD Agent Workflow.
+    Parses arguments, sets up the workspace, initializes the agent, and runs the LangGraph workflow.
+    """
+    parser = argparse.ArgumentParser(description="TDD Agent Workflow")
+    parser.add_argument("--resume", action="store_true", help="Resume workflow from the last checkpoint")
+    parser.add_argument("--goal", type=str, default=config.GOAL, help="Goal description")
+    parser.add_argument("--spec-url", type=str, default=config.SPEC_URL, help="Specification URL")
+    parser.add_argument("--max-iterations", type=int, default=config.MAX_ITERATIONS, help="Maximum workflow iterations")
+    parser.add_argument(
+        "--max-test-plan-iterations", type=int, default=config.MAX_TEST_PLAN_ITERATIONS, help="Max test plan iterations"
+    )
+    parser.add_argument(
+        "--max-test-iterations", type=int, default=config.MAX_TEST_ITERATIONS, help="Max test iterations"
+    )
+    parser.add_argument(
+        "--target-test-plan-coverage",
+        type=int,
+        default=config.TARGET_TEST_PLAN_COVERAGE,
+        help="Target test plan coverage",
+    )
+    parser.add_argument(
+        "--target-test-coverage", type=int, default=config.TARGET_TEST_COVERAGE, help="Target test coverage"
+    )
+    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose log outputs")
+    parser.add_argument("--session-id", type=str, default=config.SESSION_ID, help="Session ID / subdirectory name")
+    parser.add_argument("--domain-tips", type=str, default=config.DOMAIN_TIPS, help="Implementation domain tips text")
+    parser.add_argument("--domain-tips-file", type=str, default="", help="Path to file containing domain tips text")
+    parser.add_argument(
+        "--draw-graph",
+        action="store_true",
+        help="Draw and save the workflow graph image to the current directory ('workflow_graph.png') and exit",
+    )
+    args = parser.parse_args(args_list)
+
+    if args.domain_tips_file:
+        try:
+            with open(args.domain_tips_file, "r", encoding="utf-8") as f:
+                args.domain_tips = f.read()
+        except Exception as e:
+            print(f"⚠️ Failed to read domain tips file {args.domain_tips_file}: {e}")
+
+    if args.verbose:
+        config.VERBOSE = True
+
+    if args.draw_graph:
+        tdd_agent = TDDAgent()
+        try:
+            graph_path = "workflow_graph.png"
+            with open(graph_path, "wb") as graph_f:
+                graph_f.write(tdd_agent.get_graph().draw_mermaid_png())
+            print(f"✅ Saved workflow graph to {graph_path}")
+            return None
+        except Exception as e:
+            print(f"❌ Could not save workflow graph image: {e}")
+            sys.exit(1)
+
+    # Resolve session ID and paths
+    session_id = args.session_id
+    if args.resume and (not args.session_id or args.session_id == config.SESSION_ID):
+        base_dir = config.TDD_BASE_ARTIFACTS_DIR
+        latest_session = None
+        latest_mtime = 0.0
+        if os.path.exists(base_dir):
+            for entry in os.listdir(base_dir):
+                entry_path = os.path.join(base_dir, entry)
+                if os.path.isdir(entry_path):
+                    chk_path = os.path.join(entry_path, "checkpoint.pkl")
+                    if os.path.exists(chk_path):
+                        try:
+                            mtime = os.path.getmtime(chk_path)
+                            if mtime > latest_mtime:
+                                latest_mtime = mtime
+                                latest_session = entry
+                        except Exception:
+                            continue
+        if latest_session:
+            session_id = latest_session
+            print(f"🔄 Auto-detected latest session to resume: '{session_id}'")
+        else:
+            session_id = args.session_id or config.SESSION_ID
+            print(f"⚠️ No past session with checkpoint.pkl found to resume. Defaulting to session: '{session_id}'")
+
+    # Update global config paths dynamically
+    config.SESSION_ID = session_id
+    config.ARTIFACTS_DIR = os.path.join(config.TDD_BASE_ARTIFACTS_DIR, session_id)
+    artifacts_dir = config.ARTIFACTS_DIR
+
+    # Ensure artifacts directory exists
+    os.makedirs(artifacts_dir, exist_ok=True)
+
+    # Establish session-wide file lock using fcntl to prevent double running on the same session
+    lock_file_path = os.path.join(artifacts_dir, ".session.lock")
+    lock_file_handle = None
+    try:
+        import fcntl
+
+        lock_file_handle = open(lock_file_path, "w")
+        # Try to lock it. If blocked, raise BlockingIOError
+        fcntl.flock(lock_file_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(f"\n⚠️ ERROR: Session '{session_id}' is already locked and running in another instance.")
+        print("To run multiple workflows, please specify different session IDs or run them in separate sessions.\n")
+        sys.exit(1)
+    except Exception as e:
+        if config.VERBOSE:
+            print(f"Warning: Could not establish session lock: {e}")
+
+    checkpoint_path = os.path.join(artifacts_dir, "checkpoint.pkl")
+    checkpoint_exists = os.path.exists(checkpoint_path)
+    should_resume = args.resume and checkpoint_exists
+
+    if args.resume and not checkpoint_exists:
+        print("⚠️ No checkpoint found in session directory. Starting a new workflow.")
+
+    if not should_resume:
+        # Prompt for goal if missing and running in interactive terminal
+        if not args.goal and sys.stdin.isatty():
+            try:
+                print("\n💡 TDD Agent: Starting a new workflow.")
+                user_goal = input("Enter your goal description (e.g., 'Build a calculator'): ").strip()
+                if user_goal:
+                    args.goal = user_goal
+            except KeyboardInterrupt:
+                print("\n🛑 Interrupted. Exiting...")
+                sys.exit(130)
+
+        if not args.goal:
+            parser.error("--goal is required when starting a new workflow")
+
+        # Prompt for spec_url if missing and running in interactive terminal
+        if not args.spec_url and sys.stdin.isatty():
+            try:
+                user_spec = input("Enter the specification URL or local file path: ").strip()
+                if user_spec:
+                    args.spec_url = user_spec
+            except KeyboardInterrupt:
+                print("\n🛑 Interrupted. Exiting...")
+                sys.exit(130)
+
+        if not args.spec_url:
+            parser.error("--spec-url is required when starting a new workflow")
+
+    config_meta_path = os.path.join(artifacts_dir, "config_meta.json")
+    current_config_meta = {
+        "GOAL": args.goal,
+        "SPEC_URL": args.spec_url,
+        "MODEL_PRIMARY": config.MODEL_PRIMARY,
+        "MODEL_SECONDARY": config.MODEL_SECONDARY,
+        "LLM_SEED": config.LLM_SEED,
+        "TARGET_TEST_PLAN_COVERAGE": args.target_test_plan_coverage,
+        "TARGET_TEST_COVERAGE": args.target_test_coverage,
+        "DOMAIN_TIPS": args.domain_tips,
+    }
+
+    if should_resume:
+        print(f"🔄 Resuming session '{session_id}' from the previous run...")
+        if os.path.exists(config_meta_path):
+            with open(config_meta_path, "r", encoding="utf-8") as meta_f:
+                old_config_meta = json.load(meta_f)
+
+            mismatches = []
+            for k, v in old_config_meta.items():
+                if k in current_config_meta and current_config_meta[k] != v:
+                    mismatches.append(f"{k}: '{v}' -> '{current_config_meta[k]}'")
+
+            if mismatches:
+                print("\n⚠️ WARNING: Configuration changes detected since the last checkpoint:")
+                for m in mismatches:
+                    print(f"  - {m}")
+                print("Applying these changes to the resumed workflow may cause inconsistent behavior.\n")
+                time.sleep(10)  # Give the user time to read the warning and cancel with Ctrl+C
+    else:
+        # Check if directory has any real workflow artifacts other than the lock file or spec
+        has_run_artifacts = False
+        if os.path.exists(artifacts_dir):
+            for entry_name in os.listdir(artifacts_dir):
+                if entry_name not in ("specification.txt", ".session.lock"):
+                    has_run_artifacts = True
+                    break
+        if has_run_artifacts:
+            readme_path = os.path.join(artifacts_dir, "README.md")
+            if os.path.exists(readme_path):
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                backup_dir = f"{artifacts_dir}_{timestamp}"
+                os.makedirs(backup_dir, exist_ok=True)
+                for entry_name in os.listdir(artifacts_dir):
+                    if entry_name != ".session.lock":
+                        file_path = os.path.join(artifacts_dir, entry_name)
+                        shutil.move(file_path, os.path.join(backup_dir, entry_name))
+                print(f"📦 Backed up existing artifacts to {backup_dir}")
+
+                old_spec_path = os.path.join(backup_dir, "specification.txt")
+                if os.path.exists(old_spec_path):
+                    shutil.copy2(old_spec_path, os.path.join(artifacts_dir, "specification.txt"))
+            else:
+                for entry_name in os.listdir(artifacts_dir):
+                    if entry_name not in ("specification.txt", ".session.lock"):
+                        file_path = os.path.join(artifacts_dir, entry_name)
+                        try:
+                            if os.path.isfile(file_path) or os.path.islink(file_path):
+                                os.remove(file_path)
+                            elif os.path.isdir(file_path):
+                                shutil.rmtree(file_path)
+                        except Exception as e:
+                            print(f"⚠️ Failed to delete {file_path}. Reason: {e}")
+
+    # Update config metadata for future resumes
+    with open(config_meta_path, "w", encoding="utf-8") as meta_f:
+        json.dump(current_config_meta, meta_f, indent=2)
+
+    initial_state = {
+        "goal": args.goal,
+        "spec_url": args.spec_url,
+        "max_iterations": args.max_iterations,
+        "max_test_plan_iterations": args.max_test_plan_iterations,
+        "max_test_iterations": args.max_test_iterations,
+        "target_test_plan_coverage": args.target_test_plan_coverage,
+        "target_test_coverage": args.target_test_coverage,
+        "domain_tips": args.domain_tips or "",
+    }
+
+    config_opts = {"configurable": {"thread_id": config.SESSION_ID, "recursion_limit": 150}}
+
+    # Initialize Agent
+    memory_saver = FileMemorySaver(checkpoint_path)
+    tdd_agent = TDDAgent(checkpointer=memory_saver)
+
+    # Bind dynamic oracle verifier for assertions
+    from utils import evaluate_math_expression
+
+    config.ORACLE_VERIFIER = evaluate_math_expression
+
+    # Configure MLflow tracking with automatic local fallback
+    mlflow_uri = "http://localhost:5000"
+    is_server_online = False
+
+    import socket
+
+    try:
+        # Test connection to port 5000 with a 1-second timeout
+        with socket.create_connection(("localhost", 5000), timeout=1.0):
+            is_server_online = True
+    except Exception:
+        pass
+
+    if is_server_online:
+        mlflow.set_tracking_uri(mlflow_uri)
+    else:
+        local_db_uri = "sqlite:///mlflow.db"
+        print(f"\nℹ️ MLflow server at {mlflow_uri} is offline. Falling back to local database ({local_db_uri}).")
+        mlflow.set_tracking_uri(local_db_uri)
+
+    mlflow.set_experiment("TDD_Agent_Experiment")
+    try:
+        mlflow.gemini.autolog()
+    except Exception as e:
+        print(f"Warning: Could not configure MLflow Gemini Autolog: {e}")
+
+    # Prevent MLflow's LangChain Tracer from crashing due to unsupported on_resume callback
+    if not should_resume:
+        try:
+            mlflow.langchain.autolog()
+        except Exception as e:
+            print(f"Warning: Could not configure MLflow LangChain Autolog: {e}")
+
+    print("\n🚀 Invoking the TDD Agent Workflow...")
+    with mlflow.start_run(run_name=config.RUN_NAME):
+        mlflow.log_param("goal", args.goal)
+        mlflow.log_param("spec_url", args.spec_url)
+        mlflow.log_param("max_iterations", initial_state["max_iterations"])
+        mlflow.log_param(
+            "max_test_plan_iterations", initial_state.get("max_test_plan_iterations", config.MAX_TEST_PLAN_ITERATIONS)
+        )
+        mlflow.log_param("max_test_iterations", initial_state.get("max_test_iterations", config.MAX_TEST_ITERATIONS))
+        mlflow.log_param(
+            "target_test_plan_coverage",
+            initial_state.get("target_test_plan_coverage", config.TARGET_TEST_PLAN_COVERAGE),
+        )
+        mlflow.log_param("target_test_coverage", initial_state.get("target_test_coverage", config.TARGET_TEST_COVERAGE))
+        mlflow.log_param("resumed", should_resume)
+
+        if should_resume:
+            final_state = tdd_agent.invoke(None, config=config_opts)
+        else:
+            final_state = tdd_agent.invoke(initial_state, config=config_opts)
+
+        mlflow.log_metric("iterations", final_state.get("iterations", 0))
+        mlflow.log_param("success", final_state.get("success", False))
+
+        if "design_doc" in final_state:
+            mlflow.log_text(final_state["design_doc"], "design.md")
+        if "test_plan" in final_state:
+            mlflow.log_text(final_state["test_plan"], "test_plan.md")
+        if "tests_code" in final_state:
+            mlflow.log_text(final_state["tests_code"], final_state.get("test_module_name", DEFAULT_TEST_NAME))
+        if "impl_code" in final_state:
+            mlflow.log_text(final_state["impl_code"], final_state.get("module_name", DEFAULT_IMPL_NAME))
+        if "readme_content" in final_state:
+            mlflow.log_text(final_state["readme_content"], "README.md")
+        if "bug_report" in final_state:
+            mlflow.log_text(final_state["bug_report"], "bug_report.md")
+        if "test_output" in final_state:
+            mlflow.log_text(final_state["test_output"], "test_output.txt")
+
+    # Display Results & Demo
+    if final_state.get("success", False):
+        print("\n=== 🎉 TDD and Specification Retrieval Workflow Complete ===")
+        impl_name = final_state.get("module_name", DEFAULT_IMPL_NAME)
+        test_name = final_state.get("test_module_name", DEFAULT_TEST_NAME)
+        impl_path = os.path.join(artifacts_dir, impl_name)
+        test_path = os.path.join(artifacts_dir, test_name)
+
+        print(f"\n### 📄 Implementation Code (`{impl_path}`)")
+        print(f"```python\n{final_state.get('impl_code', '')}\n```")
+
+        print(f"\n### 🧪 Test Code (`{test_path}`)")
+        print(f"```python\n{final_state.get('tests_code', '')}\n```")
+
+        print(f"\n### 📝 {os.path.join(artifacts_dir, 'README.md')}")
+        print(final_state.get("readme_content", ""))
+
+    else:
+        print("\n=== ❌ Workflow Failed ===")
+        print("\n### 🐞 Last Test Output")
+        print(f"```text\n{final_state.get('test_output', 'No test output available.')}\n```")
+
+    return final_state
+
+
+if __name__ == "__main__":
+    try:
+        final_state = main()
+        if final_state and not final_state.get("success", False):
+            sys.exit(1)
+    except KeyboardInterrupt:
+        print("\n\n🛑 Execution interrupted by user. Exiting gracefully.")
+        sys.exit(130)
